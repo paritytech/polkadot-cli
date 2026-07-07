@@ -440,6 +440,17 @@ export async function handleTx(
     const decodedStr = decodeCall(meta, callHex);
     const decodedObj = decodeCallObject(meta, callHex);
 
+    // Transaction extensions applied to this (signed) tx, with their effective
+    // values including defaults — derived from chain metadata so it's per-chain
+    // correct. Shown in the signed dry-run and submit output below.
+    const appliedExtensions = describeAppliedExtensions(meta, {
+      nonce,
+      tip,
+      asset,
+      mortality,
+      userExtOverrides: parseExtOption(opts.ext),
+    });
+
     // --- Unsigned dry-run ---
     if (opts.dryRun && opts.unsigned) {
       if (isJsonOutput(opts)) {
@@ -485,6 +496,7 @@ export async function handleTx(
           from: { name: opts.from, address: signerAddress },
           callHex,
           decoded: decodedStr,
+          extensions: appliedExtensions.map(appliedExtensionJson),
           estimatedFees,
         };
         if (estimationError !== undefined) result.estimationError = estimationError;
@@ -502,13 +514,7 @@ export async function handleTx(
       console.log(`  ${BOLD}From:${RESET}   ${opts.from} (${signerAddress})`);
       console.log(`  ${BOLD}Call:${RESET}   ${callHex}`);
       printDecodedCall(decodedObj, decodedStr);
-      if (nonce !== undefined) console.log(`  ${BOLD}Nonce:${RESET} ${nonce}`);
-      if (tip !== undefined) console.log(`  ${BOLD}Tip:${RESET}   ${tip}`);
-      if (asset !== undefined) console.log(`  ${BOLD}Asset:${RESET} ${JSON.stringify(asset)}`);
-      if (mortality !== undefined)
-        console.log(
-          `  ${BOLD}Mortality:${RESET} ${mortality.mortal ? `mortal (period ${mortality.period})` : "immortal"}`,
-        );
+      printAppliedExtensions(appliedExtensions);
       if (at !== undefined) console.log(`  ${BOLD}At:${RESET}    ${at}`);
 
       if (estimatedFees !== undefined) {
@@ -676,6 +682,7 @@ export async function handleTx(
         blockHash,
         txHash: result.txHash,
         ok: result.ok,
+        extensions: appliedExtensions.map(appliedExtensionJson),
         events: result.events?.map((e: any) => ({
           pallet: e.type,
           name: e.value?.type,
@@ -702,13 +709,7 @@ export async function handleTx(
     console.log(`  ${BOLD}Chain:${RESET}  ${chainName}`);
     console.log(`  ${BOLD}Call:${RESET}   ${callHex}`);
     printDecodedCall(decodedObj, decodedStr);
-    if (nonce !== undefined) console.log(`  ${BOLD}Nonce:${RESET} ${nonce}`);
-    if (tip !== undefined) console.log(`  ${BOLD}Tip:${RESET}   ${tip}`);
-    if (asset !== undefined) console.log(`  ${BOLD}Asset:${RESET} ${JSON.stringify(asset)}`);
-    if (mortality !== undefined)
-      console.log(
-        `  ${BOLD}Mortality:${RESET} ${mortality.mortal ? `mortal (period ${mortality.period})` : "immortal"}`,
-      );
+    printAppliedExtensions(appliedExtensions);
     if (at !== undefined) console.log(`  ${BOLD}At:${RESET}    ${at}`);
     console.log(`  ${BOLD}Tx:${RESET}     ${result.txHash}`);
 
@@ -1561,6 +1562,136 @@ function parseExtOption(ext: string | undefined): Record<string, any> {
 
 /** Sentinel value: type could not be auto-defaulted */
 const NO_DEFAULT = Symbol("no-default");
+
+// --- Applied transaction-extension visibility ---
+
+/**
+ * One transaction (signed) extension applied to a tx, as shown to the user.
+ * The extension SET is derived from chain metadata, so it is correct per-chain.
+ */
+export interface AppliedExtension {
+  identifier: string;
+  /** True when polkadot-api fills this in automatically. */
+  isBuiltin: boolean;
+  /**
+   * Human-readable effective value. Empty string means the extension carries
+   * no user-facing value on this path (filled entirely by the runtime / papi).
+   */
+  value: string;
+  /** Whether the value was chosen by the user, is a default, or set by the runtime. */
+  source: "user" | "default" | "runtime";
+}
+
+function formatExtOverrideValue(raw: unknown): string {
+  if (raw === undefined || raw === null) return "null";
+  if (typeof raw === "bigint") return raw.toString();
+  if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") {
+    return String(raw);
+  }
+  return JSON.stringify(raw, (_k, v) => (typeof v === "bigint" ? v.toString() : v));
+}
+
+/**
+ * Describe the transaction extensions applied to a tx and their effective
+ * values, INCLUDING defaults. The extension set is read from the chain's
+ * metadata so it reflects exactly what this chain declares. For the extensions
+ * the CLI controls (nonce/tip/mortality/asset) the concrete value (or its
+ * default) is shown; the rest are marked as filled in by polkadot-api / the
+ * runtime. This is visibility only — it mirrors, and does not change, signing.
+ */
+export function describeAppliedExtensions(
+  meta: MetadataBundle,
+  applied: {
+    nonce?: number;
+    tip?: bigint;
+    asset?: Record<string, unknown>;
+    mortality?: MortalityOption;
+    userExtOverrides?: Record<string, any>;
+  } = {},
+): AppliedExtension[] {
+  const { nonce, tip, asset, mortality, userExtOverrides = {} } = applied;
+
+  return getSignedExtensions(meta).map((ext): AppliedExtension => {
+    const identifier = ext.identifier;
+    const isBuiltin = PAPI_BUILTIN_EXTENSIONS.has(identifier);
+
+    // An explicit --ext override wins for display, whatever the extension is.
+    if (identifier in userExtOverrides) {
+      const override = userExtOverrides[identifier];
+      const raw =
+        override && typeof override === "object" && "value" in override ? override.value : override;
+      return { identifier, isBuiltin, source: "user", value: formatExtOverrideValue(raw) };
+    }
+
+    switch (identifier) {
+      case "CheckNonce":
+        return nonce !== undefined
+          ? { identifier, isBuiltin, source: "user", value: String(nonce) }
+          : { identifier, isBuiltin, source: "default", value: "auto-fetched from chain" };
+      case "ChargeTransactionPayment":
+        return tip !== undefined
+          ? { identifier, isBuiltin, source: "user", value: `tip ${tip}` }
+          : { identifier, isBuiltin, source: "default", value: "tip 0" };
+      case "ChargeAssetTxPayment":
+        return asset !== undefined
+          ? { identifier, isBuiltin, source: "user", value: `asset ${JSON.stringify(asset)}` }
+          : { identifier, isBuiltin, source: "default", value: "native token for fees" };
+      case "CheckMortality":
+        if (mortality === undefined)
+          return { identifier, isBuiltin, source: "default", value: "mortal" };
+        return mortality.mortal
+          ? { identifier, isBuiltin, source: "user", value: `mortal (period ${mortality.period})` }
+          : { identifier, isBuiltin, source: "user", value: "immortal" };
+      default:
+        // Custom (non-builtin) extensions the CLI auto-defaults can still be
+        // steered with --ext; builtins are handled entirely by polkadot-api.
+        return isBuiltin
+          ? { identifier, isBuiltin, source: "runtime", value: "" }
+          : {
+              identifier,
+              isBuiltin,
+              source: "default",
+              value: "auto-default (override via --ext)",
+            };
+    }
+  });
+}
+
+/** Shape an AppliedExtension for `--json` output. */
+export function appliedExtensionJson(e: AppliedExtension): {
+  identifier: string;
+  isBuiltin: boolean;
+  source: string;
+  value: string | null;
+} {
+  return {
+    identifier: e.identifier,
+    isBuiltin: e.isBuiltin,
+    source: e.source,
+    value: e.value === "" ? null : e.value,
+  };
+}
+
+/** Print the "Extensions:" section for human-readable tx output. */
+function printAppliedExtensions(extensions: AppliedExtension[]): void {
+  if (extensions.length === 0) return;
+  console.log(`  ${BOLD}Extensions:${RESET}`);
+  const width = Math.max(...extensions.map((e) => e.identifier.length));
+  for (const e of extensions) {
+    const name = `${CYAN}${e.identifier.padEnd(width)}${RESET}`;
+    const tag = e.isBuiltin ? `${DIM}[builtin]${RESET}` : `${YELLOW}[custom]${RESET}`;
+    let value: string;
+    if (e.value === "") {
+      value = `${DIM}filled in by polkadot-api${RESET}`;
+    } else if (e.source === "default" && !e.value.includes("(")) {
+      // Flag defaulted values, unless the value already carries its own hint.
+      value = `${e.value} ${DIM}(default)${RESET}`;
+    } else {
+      value = e.value;
+    }
+    console.log(`    ${name}  ${value}  ${tag}`);
+  }
+}
 
 function buildCustomSignedExtensions(
   meta: MetadataBundle,
