@@ -994,4 +994,181 @@ describe("dot chain", () => {
     expect(stdout).toContain("dot chain info <name>");
     expect(stdout).toContain("dot chain <name>");
   });
+
+  test("help text mentions properties action", async () => {
+    const { stdout, exitCode } = await runCli(["chain"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("dot chain properties <name>");
+  });
+});
+
+/**
+ * Minimal JSON-RPC-over-WebSocket server so the properties command can be
+ * exercised end-to-end (through the real one-shot RPC client) without a live
+ * node. `responder` maps a method name to either a result value or an Error
+ * (returned as a JSON-RPC error, mimicking an unsupported method).
+ */
+function startRpcServer(responder: (method: string) => unknown): {
+  url: string;
+  stop: () => void;
+} {
+  const server = Bun.serve({
+    port: 0,
+    fetch(req, srv) {
+      if (srv.upgrade(req)) return undefined;
+      return new Response("expected websocket", { status: 426 });
+    },
+    websocket: {
+      message(ws, raw) {
+        const msg = JSON.parse(String(raw)) as { id: number | string; method: string };
+        // The polkadot-api ws provider probes `rpc_methods` on connect to pick
+        // its legacy/modern routing — answer it before delegating to responder.
+        if (msg.method === "rpc_methods") {
+          ws.send(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: msg.id,
+              result: {
+                methods: ["system_properties", "chainSpec_v1_properties", "rpc_methods"],
+                version: 1,
+              },
+            }),
+          );
+          return;
+        }
+        let payload: unknown;
+        try {
+          const result = responder(msg.method);
+          if (result instanceof Error) throw result;
+          payload = { jsonrpc: "2.0", id: msg.id, result };
+        } catch (err) {
+          payload = {
+            jsonrpc: "2.0",
+            id: msg.id,
+            error: { code: -32601, message: err instanceof Error ? err.message : "error" },
+          };
+        }
+        ws.send(JSON.stringify(payload));
+      },
+    },
+  });
+  return {
+    url: `ws://127.0.0.1:${server.port}`,
+    stop: () => server.stop(true),
+  };
+}
+
+describe("dot chain properties", () => {
+  test("no name errors with usage", async () => {
+    const { stderr, exitCode } = await runCli(["chain", "properties"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("Usage: dot chain properties");
+  });
+
+  test("unknown chain errors before any RPC call", async () => {
+    const { stderr, exitCode } = await runCli(["chain", "properties", "nonexistent-chain"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("nonexistent-chain");
+  });
+
+  test("--json returns scalar properties from system_properties", async () => {
+    const server = startRpcServer((method) => {
+      if (method === "system_properties") {
+        return { tokenDecimals: 10, tokenSymbol: "DOT", ss58Format: 0 };
+      }
+      return new Error("Method not found");
+    });
+    try {
+      const { stdout, exitCode } = await runCli(
+        ["chain", "properties", "polkadot", "--rpc", server.url, "--json"],
+        { noDefaultChain: true },
+      );
+      expect(exitCode).toBe(0);
+      const parsed = JSON.parse(stdout);
+      expect(parsed).toEqual({ tokenDecimals: 10, tokenSymbol: "DOT", ss58Format: 0 });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("--json preserves array-typed properties (multi-token chains)", async () => {
+    const server = startRpcServer((method) => {
+      if (method === "system_properties") {
+        return { tokenDecimals: [12, 10], tokenSymbol: ["ACA", "AUSD"], ss58Format: 10 };
+      }
+      return new Error("Method not found");
+    });
+    try {
+      const { stdout, exitCode } = await runCli(
+        ["chain", "properties", "polkadot", "--rpc", server.url, "--json"],
+        { noDefaultChain: true },
+      );
+      expect(exitCode).toBe(0);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.tokenDecimals).toEqual([12, 10]);
+      expect(parsed.tokenSymbol).toEqual(["ACA", "AUSD"]);
+      expect(parsed.ss58Format).toBe(10);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("--json handles empty {} properties as nulls", async () => {
+    const server = startRpcServer((method) => {
+      if (method === "system_properties") return {};
+      return new Error("Method not found");
+    });
+    try {
+      const { stdout, exitCode } = await runCli(
+        ["chain", "properties", "polkadot", "--rpc", server.url, "--json"],
+        { noDefaultChain: true },
+      );
+      expect(exitCode).toBe(0);
+      const parsed = JSON.parse(stdout);
+      expect(parsed).toEqual({ tokenDecimals: null, tokenSymbol: null, ss58Format: null });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("falls back to chainSpec_v1_properties when system_properties is unavailable", async () => {
+    const server = startRpcServer((method) => {
+      if (method === "chainSpec_v1_properties") {
+        return { tokenDecimals: 12, tokenSymbol: "KSM", ss58Format: 2 };
+      }
+      return new Error("Method not found");
+    });
+    try {
+      const { stdout, exitCode } = await runCli(
+        ["chain", "properties", "polkadot", "--rpc", server.url, "--json"],
+        { noDefaultChain: true },
+      );
+      expect(exitCode).toBe(0);
+      const parsed = JSON.parse(stdout);
+      expect(parsed).toEqual({ tokenDecimals: 12, tokenSymbol: "KSM", ss58Format: 2 });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("human-readable output shows labels", async () => {
+    const server = startRpcServer((method) => {
+      if (method === "system_properties") {
+        return { tokenDecimals: 10, tokenSymbol: "DOT", ss58Format: 0 };
+      }
+      return new Error("Method not found");
+    });
+    try {
+      const { stdout, exitCode } = await runCli(
+        ["chain", "properties", "polkadot", "--rpc", server.url],
+        { noDefaultChain: true },
+      );
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("token decimals");
+      expect(stdout).toContain("DOT");
+      expect(stdout).toContain("ss58 format");
+    } finally {
+      server.stop();
+    }
+  });
 });

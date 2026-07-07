@@ -253,7 +253,22 @@ polkadot-asset-hub
     not cached — run `dot chain update polkadot-asset-hub`
 ```
 
-`dot chain <name>` is a bare-noun shortcut for `dot chain info <name>`. Known action verbs (`add`, `remove`, `update`, `list`, `export`, `import`, `info`) take precedence over chain names if there's ever a clash. Names resolve case-insensitively. `dot chain info <name> --json` emits the same data as a structured object — `metadata` is `null` when no fingerprint is cached.
+`dot chain <name>` is a bare-noun shortcut for `dot chain info <name>`. Known action verbs (`add`, `remove`, `update`, `list`, `export`, `import`, `info`, `properties`) take precedence over chain names if there's ever a clash. Names resolve case-insensitively. `dot chain info <name> --json` emits the same data as a structured object — `metadata` is `null` when no fingerprint is cached.
+
+### Chain properties
+
+Ask a chain for its token decimals, symbol, and ss58 prefix instead of hardcoding them per environment. `dot chain properties <name>` queries `system_properties` and falls back to the modern `chainSpec_v1_properties`:
+
+```
+dot chain properties polkadot --json
+# {
+#   "tokenDecimals": 10,
+#   "tokenSymbol": "DOT",
+#   "ss58Format": 0
+# }
+```
+
+This is the recommended way for scripts to obtain decimals — for example `NATIVE_DECIMALS=$(dot chain properties polkadot --json | jq .tokenDecimals)`. Chains that list multiple native-ish tokens return `tokenDecimals`/`tokenSymbol` as arrays, preserved as-is; minimal chains that expose no properties return `null` for each field.
 
 ### Update metadata
 

@@ -196,6 +196,35 @@ All built-in system parachains are preconfigured with their relay chain and para
 
 Removing a relay chain that has parachains prints a warning listing the orphaned chains. The parachains remain in the config and can be re-associated later.
 
+#### Chain properties
+
+`dot chain properties <name>` asks the node for its `tokenDecimals`, `tokenSymbol`, and `ss58Format` — so scripts stop hardcoding per-chain decimals. It queries `system_properties` (universally implemented) and falls back to the modern `chainSpec_v1_properties` if the node doesn't expose it.
+
+```bash
+dot chain properties polkadot
+
+# polkadot
+#   token decimals: 10
+#   token symbol: DOT
+#   ss58 format: 0
+```
+
+The `--json` form emits a stable `{ tokenDecimals, tokenSymbol, ss58Format }` object, which is what you want for scripting:
+
+```bash
+dot chain properties polkadot --json
+# {
+#   "tokenDecimals": 10,
+#   "tokenSymbol": "DOT",
+#   "ss58Format": 0
+# }
+
+# Replace a hardcoded NATIVE_DECIMALS=12 with the value the chain reports:
+NATIVE_DECIMALS=$(dot chain properties polkadot --json | jq .tokenDecimals)
+```
+
+Some chains list multiple native-ish tokens and return `tokenDecimals`/`tokenSymbol` as arrays — these are preserved verbatim in the JSON (not collapsed to the first element). Minimal chains that return no properties surface `null` for each field rather than erroring.
+
 #### Selecting a chain
 
 Every chain-consuming command must specify a chain explicitly. Prefer the dotpath chain prefix; the `--chain <name>` flag is equivalent. There is no hidden default; running a command without a chain errors out with a message listing the configured chains.
