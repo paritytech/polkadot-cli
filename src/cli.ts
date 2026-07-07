@@ -409,7 +409,9 @@ if (process.argv[2] === "__complete") {
     console.log(
       "  parachain          Derive parachain sovereign accounts (deprecated — use `account inspect --parachain`)",
     );
-    console.log("  verifiable         Bandersnatch member keys, ring-VRF proofs, sign/verify");
+    console.log(
+      "  verifiable         Bandersnatch member keys, ring-VRF proofs, sign/verify (alias: bandersnatch)",
+    );
     console.log("  completions <sh>   Generate shell completions (zsh, bash, fish)");
     console.log("  init               Initialize a local .polkadot workspace in this directory");
     console.log(

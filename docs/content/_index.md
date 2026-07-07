@@ -2502,6 +2502,8 @@ dot account inspect --parachain 1000 --parachain-type child --json
 
 `dot verifiable` is a set of composable, unopinionated primitives over the [`verifiablejs`](https://github.com/paritytech/verifiablejs) WASM library (Ring VRF on the Bandersnatch curve): derive member keys, sign, generate and verify ring-VRF proofs, and encode member sets. Every action is **bytes-in, bytes-out** — it takes hex / `--file` / `--stdin` input and supports `--output json`, so it pipes together and composes with any data (for example values you fetched on-chain with `dot` beforehand). It does no automated fetching or selection and assumes nothing about how the bytes were produced or where they go — feed the resulting signature/proof into a `dot` extrinsic or signed extension, or use it elsewhere. Runs offline.
 
+`bandersnatch` is an alias for `verifiable`: `dot bandersnatch <action>` is identical to `dot verifiable <action>` in every form and option.
+
 ### Two concepts you must not conflate
 
 ```
