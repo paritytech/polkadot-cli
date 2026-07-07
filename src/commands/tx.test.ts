@@ -1465,6 +1465,21 @@ describe("buildCustomSignedExtensions", () => {
     const result = buildCustomSignedExtensions(meta, {});
     expect(Object.keys(result).length).toBe(0);
   });
+
+  test("honors an explicit --ext override for a builtin extension", () => {
+    const override = { value: { type: "Immortal", value: undefined } };
+    const result = buildCustomSignedExtensions(meta, { CheckMortality: override });
+    expect(result.CheckMortality).toEqual(override);
+  });
+
+  test("only overrides the builtins named in --ext, leaving the rest to polkadot-api", () => {
+    const result = buildCustomSignedExtensions(meta, {
+      CheckMortality: { value: { type: "Immortal", value: undefined } },
+    });
+    expect(result).not.toHaveProperty("CheckNonce");
+    expect(result).not.toHaveProperty("ChargeTransactionPayment");
+    expect(Object.keys(result)).toEqual(["CheckMortality"]);
+  });
 });
 
 // ---------------------------------------------------------------------------

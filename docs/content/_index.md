@@ -1441,7 +1441,11 @@ dot polkadot.extensions.CheckMortality
 #
 #   Value type:       enum(256 variants)
 #   AdditionalSigned: [u8; 32]
-#   Handled by:       polkadot-api (builtin)
+#   Handled by:       polkadot-api (builtin) — filled in automatically, override with --ext
+#
+# Usage:
+#   dot polkadot.tx.<Pallet>.<Call> --from <acc> --ext '{"CheckMortality":{"value":<v>}}'
+#   Builtin: polkadot-api sets a value by default; pass --ext only to override it.
 
 # Structured output for scripts / agents
 dot polkadot.extensions --json
@@ -1451,7 +1455,7 @@ dot polkadot.extensions --json
 
 Each entry is tagged:
 
-- `[builtin]` — `polkadot-api` handles this extension for you when signing. Examples: `CheckMortality`, `CheckNonce`, `ChargeTransactionPayment`, `CheckMetadataHash`, `StorageWeightReclaim`.
+- `[builtin]` — `polkadot-api` handles this extension for you when signing. Examples: `CheckMortality`, `CheckNonce`, `ChargeTransactionPayment`, `CheckMetadataHash`, `StorageWeightReclaim`. You can still override any builtin with `--ext` when you need to (e.g. `--asset` is just sugar over overriding `ChargeAssetTxPayment`).
 - `[custom]` — you must provide a value via `--ext` when signing. The detail view shows the value type and a ready-to-adapt snippet:
 
   ```

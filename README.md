@@ -1123,10 +1123,10 @@ dot polkadot.extensions --json
 
 The list view tags each entry:
 
-- `[builtin]` — `polkadot-api` fills this in for you (e.g. `CheckMortality`, `CheckNonce`, `ChargeTransactionPayment`, `CheckMetadataHash`)
+- `[builtin]` — `polkadot-api` fills this in for you automatically (e.g. `CheckMortality`, `CheckNonce`, `ChargeTransactionPayment`, `CheckMetadataHash`). You normally never touch these, but you _can_ override any of them with `--ext` if you need to.
 - `[custom]` — you must provide a value with `--ext` when signing, for example `--ext '{"<Identifier>":{"value":<v>}}'`
 
-The detail view shows the extension's value type, its `additionalSigned` type, and a ready-to-adapt `--ext` snippet for custom extensions. Use this to discover what `--ext` payload a chain expects before submitting a `dot tx` command.
+The detail view shows the extension's value type, its `additionalSigned` type, and a ready-to-adapt `--ext` snippet — for both custom and builtin extensions. Use this to discover what `--ext` payload a chain expects before submitting a `dot tx` command.
 
 ### Raw JSON-RPC
 
@@ -1451,6 +1451,8 @@ For manual override, use `--ext` with a JSON object:
 ```bash
 dot polkadot.tx.System.remark 0xdeadbeef --from alice --ext '{"MyExtension":{"value":"..."}}'
 ```
+
+`--ext` is the generic escape hatch and works for **every** extension a chain declares — including `polkadot-api` builtins. Naming a builtin in `--ext` overrides the value `polkadot-api` would otherwise fill in automatically; omit it and the builtin default is used. Convenience flags like `--asset` (which overrides the `ChargeAssetTxPayment` builtin) are just sugar over an `--ext` override, so the two are always consistent.
 
 Not sure which extensions a chain exposes? Run `dot <chain>.extensions` (see [Transaction extensions](#transaction-extensions)) to list them all with value types and a `[builtin]` / `[custom]` marker.
 

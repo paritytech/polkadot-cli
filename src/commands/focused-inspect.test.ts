@@ -683,6 +683,14 @@ describe("dot extensions", () => {
     expect(stdout).toContain("polkadot-api (builtin)");
   });
 
+  test("builtin extension detail advertises the --ext override", async () => {
+    const { stdout, exitCode } = await runCli(["extensions.CheckMortality"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("override with --ext");
+    expect(stdout).toContain("Usage:");
+    expect(stdout).toContain('--ext \'{"CheckMortality":{"value":<v>}}\'');
+  });
+
   test("extension alias works", async () => {
     const { stdout, exitCode } = await runCli(["extension.CheckMortality"]);
     expect(exitCode).toBe(0);

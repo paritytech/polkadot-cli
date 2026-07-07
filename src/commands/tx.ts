@@ -335,28 +335,21 @@ export async function handleTx(
     if (!decodeOnly || opts.unsigned) {
       const userExtOverrides = parseExtOption(opts.ext);
 
-      // When --asset is specified, handle ChargeAssetTxPayment as a custom extension
-      // instead of letting PAPI handle it. PAPI's built-in path runs
+      // --asset is sugar over an explicit --ext override of the
+      // ChargeAssetTxPayment builtin. We handle it as a custom extension
+      // instead of letting PAPI handle it because PAPI's built-in path runs
       // `isAssetCompat(asset)` (packages/client/src/tx/tx.ts) against a typedef
       // derived from metadata; for XCM Location JSON on the unsafe API this
       // check rejects with "Incompatible runtime asset" even with fresh metadata.
-      // Bypassing it lets us SCALE-encode the asset directly via the metadata
-      // builder.
-      const skipBuiltins =
-        asset !== undefined
-          ? new Set([...PAPI_BUILTIN_EXTENSIONS].filter((e) => e !== "ChargeAssetTxPayment"))
-          : PAPI_BUILTIN_EXTENSIONS;
+      // Overriding the builtin lets us SCALE-encode the asset directly via the
+      // metadata builder. An explicit --ext for ChargeAssetTxPayment still wins.
       if (asset !== undefined) {
         userExtOverrides.ChargeAssetTxPayment ??= {
           value: { tip: tip ?? 0n, asset_id: asset },
         };
       }
 
-      const customSignedExtensions = buildCustomSignedExtensions(
-        meta,
-        userExtOverrides,
-        skipBuiltins,
-      );
+      const customSignedExtensions = buildCustomSignedExtensions(meta, userExtOverrides);
 
       const built: Record<string, any> = {};
       if (Object.keys(customSignedExtensions).length > 0)
@@ -1571,13 +1564,17 @@ function buildCustomSignedExtensions(
   const extensions = getSignedExtensions(meta);
 
   for (const ext of extensions) {
-    if (builtins.has(ext.identifier)) continue;
-
-    // User override takes priority
+    // An explicit --ext override always wins, even for PAPI builtins. This
+    // makes --ext the single generic mechanism for every extension and keeps
+    // it consistent with --asset (which is just sugar over overriding the
+    // ChargeAssetTxPayment builtin). Without an override, builtins are left to
+    // polkadot-api to fill in automatically.
     if (ext.identifier in userOverrides) {
       result[ext.identifier] = userOverrides[ext.identifier];
       continue;
     }
+
+    if (builtins.has(ext.identifier)) continue;
 
     // Auto-default based on type structure
     const valueEntry = meta.lookup(ext.type);
