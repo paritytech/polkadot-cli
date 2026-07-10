@@ -126,7 +126,6 @@ describe("global CLI", () => {
       { args: ["hash", "blake2b256", "--help"], expect: "dot hash" },
       { args: ["sign", "hello", "--help"], expect: "dot sign" },
       { args: ["verifiable", "prove", "--help"], expect: "dot verifiable" },
-      { args: ["parachain", "1000", "--help"], expect: "dot parachain" },
     ];
     for (const { args, expect: needle } of cases) {
       test(`${args.join(" ")} prints usage and exits 0`, async () => {

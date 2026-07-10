@@ -83,7 +83,6 @@ describe("built bundle: nested --help (issue #238)", { timeout: 60_000 }, () => 
     { args: ["chain", "add", "--help"], needle: "dot chain add" },
     { args: ["hash", "blake2b256", "--help"], needle: "dot hash" },
     { args: ["verifiable", "prove", "--help"], needle: "dot verifiable" },
-    { args: ["parachain", "1000", "--help"], needle: "dot parachain" },
   ];
   for (const { args, needle } of cases) {
     test(`${args.join(" ")} prints usage and exits 0`, async () => {

@@ -2486,18 +2486,6 @@ Pre-req: metadata cached for the chain (`dot chain update polkadot`). There is n
 - A positional address (`dot account add foo <ss58>`) cannot be combined with derivation flags.
 - Derivation flags cannot be combined with `--secret` or `--env` — a derived sovereign has no signing key.
 
-### Legacy `dot parachain` (deprecated)
-
-The earlier standalone `dot parachain <paraId>` command is **preserved for backward compatibility** and prints a deprecation warning to stderr. Stdout is byte-identical to prior releases — pipes such as `dot parachain 2004 --json | jq -r '.child.ss58'` keep working unchanged. Migrate to `dot account inspect --parachain <id> --parachain-type <child|sibling>` at your convenience. Tracked for removal in a future release ([#208](https://github.com/peetzweg/polkadot-cli/issues/208)).
-
-```bash
-# Old (deprecated alias — still works, emits stderr warning)
-dot parachain 1000 --type child --json
-
-# New
-dot account inspect --parachain 1000 --parachain-type child --json
-```
-
 ## Verifiable (Bandersnatch / Ring-VRF)
 
 `dot verifiable` is a set of composable, unopinionated primitives over the [`verifiablejs`](https://github.com/paritytech/verifiablejs) WASM library (Ring VRF on the Bandersnatch curve): derive member keys, sign, generate and verify ring-VRF proofs, and encode member sets. Every action is **bytes-in, bytes-out** — it takes hex / `--file` / `--stdin` input and supports `--output json`, so it pipes together and composes with any data (for example values you fetched on-chain with `dot` beforehand). It does no automated fetching or selection and assumes nothing about how the bytes were produced or where they go — feed the resulting signature/proof into a `dot` extrinsic or signed extension, or use it elsewhere. Runs offline.

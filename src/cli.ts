@@ -15,7 +15,6 @@ import {
 import { registerHashCommand } from "./commands/hash.ts";
 import { registerInspectCommand } from "./commands/inspect.ts";
 import { registerMetadataCommand } from "./commands/metadata.ts";
-import { registerParachainCommand } from "./commands/parachain.ts";
 import { handleQuery } from "./commands/query.ts";
 import { handleRpc } from "./commands/rpc.ts";
 import { registerSignCommand } from "./commands/sign.ts";
@@ -74,7 +73,6 @@ if (process.argv[2] === "__complete") {
   registerAccountCommands(cli);
   registerHashCommand(cli);
   registerSignCommand(cli);
-  registerParachainCommand(cli);
   registerCompletionsCommand(cli);
   registerVerifiableCommands(cli);
   registerWorkspaceCommands(cli);
@@ -424,9 +422,6 @@ if (process.argv[2] === "__complete") {
     console.log("  account            Manage accounts");
     console.log("  hash               Hash utilities");
     console.log("  sign               Sign a message with an account keypair");
-    console.log(
-      "  parachain          Derive parachain sovereign accounts (deprecated — use `account inspect --parachain`)",
-    );
     console.log("  verifiable         Bandersnatch member keys, ring-VRF proofs, sign/verify");
     console.log("  completions <sh>   Generate shell completions (zsh, bash, fish)");
     console.log("  init               Initialize a local .polkadot workspace in this directory");
