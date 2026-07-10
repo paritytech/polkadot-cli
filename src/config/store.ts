@@ -113,6 +113,23 @@ export async function saveConfig(config: Config): Promise<void> {
   await writeFile(getConfigPath(), `${JSON.stringify(config, null, 2)}\n`);
 }
 
+/**
+ * Read the chain names present in the `config.json` under `dir` without the
+ * side effects of `loadConfig` (no default seeding, no directory creation).
+ * Returns `[]` when there is no readable config there. Used to peek at a root
+ * that a new workspace is about to shadow.
+ */
+export async function peekConfiguredChains(dir: string): Promise<string[]> {
+  const path = join(dir, "config.json");
+  if (!(await fileExists(path))) return [];
+  try {
+    const parsed = JSON.parse(await readFile(path, "utf-8")) as Config;
+    return parsed.chains && typeof parsed.chains === "object" ? Object.keys(parsed.chains) : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function loadMetadata(chainName: string): Promise<Uint8Array | null> {
   const path = getMetadataPath(chainName);
   if (await fileExists(path)) {
