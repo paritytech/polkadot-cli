@@ -84,6 +84,7 @@ describe("built bundle: nested --help (issue #238)", { timeout: 60_000 }, () => 
     { args: ["hash", "blake2b256", "--help"], needle: "dot hash" },
     { args: ["verifiable", "prove", "--help"], needle: "dot verifiable" },
     { args: ["parachain", "1000", "--help"], needle: "dot parachain" },
+    { args: ["skill", "--help"], needle: "dot skill" },
   ];
   for (const { args, needle } of cases) {
     test(`${args.join(" ")} prints usage and exits 0`, async () => {
@@ -92,6 +93,15 @@ describe("built bundle: nested --help (issue #238)", { timeout: 60_000 }, () => 
       expect(stdout + stderr).toContain(needle);
     });
   }
+
+  test("skill show prints the embedded guide from the bundle", async () => {
+    // The skill markdown is embedded at build time; source-level tests run
+    // under bun (native text imports) and can't prove the string survived
+    // `bun build --target node`. Assert the frontmatter is present in dist.
+    const { stdout, exitCode } = await runBuilt(["skill", "show"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("name: dot-cli");
+  });
 
   test("required-positional commands still print help, not an arg error", async () => {
     const metadata = await runBuilt(["metadata", "--help"]);

@@ -104,6 +104,22 @@ describe("Claude Code skill marketplace", () => {
     expect(bareMatches).toEqual([]);
   });
 
+  test("SKILL.md stays portable across agents (Claude Code + Codex)", () => {
+    // Both Claude Code and Codex consume the same SKILL.md; Codex requires only
+    // `name` + `description` frontmatter and has no marketplace concept. Guard
+    // against drift that would break one agent: the frontmatter must carry the
+    // two portable keys, and the body must not hard-code a single agent's UX.
+    const md = readFileSync(join(ROOT, "dot-cli/SKILL.md"), "utf-8");
+    const fm = parseFrontmatter(md);
+    expect(fm.name).toBe("dot-cli");
+    expect(fm.description).toBeTruthy();
+
+    const body = md.replace(/^---\r?\n[\s\S]*?\r?\n---/, "");
+    // The guide teaches the `dot` CLI itself — it must not assume a specific
+    // agent's plugin/marketplace machinery (that lives in README, not the skill).
+    expect(body).not.toMatch(/\/plugin\s+(marketplace|install)/);
+  });
+
   test("SKILL.md covers the post-feedback content areas", () => {
     const md = readFileSync(join(ROOT, "dot-cli/SKILL.md"), "utf-8");
     expect(md).toContain("## Common Errors");
