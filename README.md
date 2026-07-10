@@ -1,5 +1,5 @@
 [![npm version](https://img.shields.io/npm/v/polkadot-cli)](https://www.npmjs.com/package/polkadot-cli)
-[![codecov](https://codecov.io/gh/peetzweg/polkadot-cli/branch/main/graph/badge.svg)](https://codecov.io/gh/peetzweg/polkadot-cli)
+[![codecov](https://codecov.io/gh/paritytech/polkadot-cli/branch/main/graph/badge.svg)](https://codecov.io/gh/paritytech/polkadot-cli)
 
 # polkadot-cli
 
@@ -69,7 +69,7 @@ This repo ships a [Claude Code](https://claude.com/claude-code) skill that teach
 Register the marketplace and install the skill:
 
 ```
-/plugin marketplace add peetzweg/polkadot-cli
+/plugin marketplace add paritytech/polkadot-cli
 /plugin install dot-cli@polkadot-cli
 ```
 
@@ -1925,7 +1925,7 @@ There is no central registry of "well-known" PalletIds — each runtime author p
 
 #### Legacy `dot parachain` command (deprecated)
 
-The standalone `dot parachain <paraId>` command from earlier releases is **still available for backward compatibility** and now prints a deprecation warning to stderr. Stdout output is unchanged, so existing pipes (e.g. `dot parachain 1000 --json | jq`) keep working. Migrate to `dot account inspect --parachain <id> --parachain-type <child|sibling>` at your convenience — it will be removed in a future release ([#208](https://github.com/peetzweg/polkadot-cli/issues/208)).
+The standalone `dot parachain <paraId>` command from earlier releases is **still available for backward compatibility** and now prints a deprecation warning to stderr. Stdout output is unchanged, so existing pipes (e.g. `dot parachain 1000 --json | jq`) keep working. Migrate to `dot account inspect --parachain <id> --parachain-type <child|sibling>` at your convenience — it will be removed in a future release ([#208](https://github.com/paritytech/polkadot-cli/issues/208)).
 
 ```bash
 # Old (deprecated, still works — emits stderr warning)
