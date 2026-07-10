@@ -815,6 +815,8 @@ dot polkadot.const.Balances.ExistentialDeposit --json | jq
 
 Works offline from cached metadata after the first fetch. The chain is required. Prefer the chain-prefix-on-target form (`dot inspect polkadot.System`); `--chain` is equivalent. Note that `dot polkadot.inspect.X` does **not** parse — `inspect` is a top-level command, not a dotpath category.
 
+`inspect` is **forgiving**: it accepts the same dot-paths you use to invoke a call and degrades to discovery rather than erroring. A `kind` segment (`tx`/`query`/`const`/`events`/`errors`/…) is tolerated and ignored — so `dot inspect polkadot.tx.System.remark` describes the `System.remark` call just like `dot inspect polkadot.System.remark` does. Partial paths list rather than fail: `dot inspect polkadot.query.System` (and the bare `dot inspect System`) list the pallet's items.
+
 Output is **width-aware**: short type signatures stay on a single line, longer ones expand across multiple lines with field names aligned. Composite struct fields, enum variants, and call arguments are color-coded (cyan field names, yellow primitives, magenta container keywords like `Vec`/`Option`, green enum variants) when stdout is a TTY; piped output stays plain.
 
 ```bash

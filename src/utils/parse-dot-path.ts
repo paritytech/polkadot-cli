@@ -33,7 +33,12 @@ const CATEGORY_ALIASES: Record<string, DotCategory> = {
   rpc: "rpc",
 };
 
-function matchCategory(segment: string): DotCategory | undefined {
+/**
+ * Match a segment against the known category aliases (`tx`, `query`, `const`,
+ * `events`, `errors`, `apis`, `extensions`, `rpc`, …). Case-insensitive.
+ * Returns the canonical category, or `undefined` if the segment is not a kind.
+ */
+export function matchCategory(segment: string): DotCategory | undefined {
   return CATEGORY_ALIASES[segment.toLowerCase()];
 }
 

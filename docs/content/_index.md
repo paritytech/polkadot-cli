@@ -1034,6 +1034,8 @@ Browse chain metadata offline (uses the cached copy after the first fetch). Show
 
 The chain is required: pass it with `--chain` or as a prefix on the inspect target (e.g. `dot inspect polkadot.System`).
 
+`inspect` is **forgiving** — it accepts the same dot-paths you use to invoke a call and prefers discovery over erroring. A `kind` segment (`tx`/`query`/`const`/`events`/`errors`/…) is tolerated and ignored, so `dot inspect polkadot.tx.System.remark` describes the `System.remark` call exactly as `dot inspect polkadot.System.remark` does. Partial paths list instead of failing: `dot inspect polkadot.query.System` (and the bare `dot inspect System`) list the pallet's items.
+
 Output is **width-aware**: short type signatures stay on a single line, long ones expand across multiple lines with field names aligned by colon. Composite struct fields and call arguments are color-coded (cyan field names, yellow primitives, magenta container keywords like `Vec`/`Option`, green enum variants) when stdout is a TTY; piped output stays plain.
 
 ```

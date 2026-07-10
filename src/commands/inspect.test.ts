@@ -415,6 +415,43 @@ describe("dot inspect", () => {
     expect(stdout).toContain("(Storage)");
   });
 
+  // --- Forgiving dot-paths with a kind segment (#255) ---
+
+  test("inspect polkadot.tx.System.remark inspects the call (kind stripped)", async () => {
+    const { stdout, exitCode } = await runCli(["inspect", "polkadot.tx.System.remark"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("System.remark");
+    expect(stdout).toContain("(Call)");
+    expect(stdout).toContain("Args:");
+  });
+
+  test("inspect tx.System.remark inspects the call (no chain prefix)", async () => {
+    const { stdout, exitCode } = await runCli(["inspect", "tx.System.remark"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("System.remark");
+    expect(stdout).toContain("(Call)");
+  });
+
+  test("inspect polkadot.query.System degrades to listing the pallet", async () => {
+    const { stdout, exitCode } = await runCli(["inspect", "polkadot.query.System"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("System Pallet");
+    expect(stdout).toContain("Storage Items:");
+  });
+
+  test("inspect const.System degrades to listing the pallet (no chain prefix)", async () => {
+    const { stdout, exitCode } = await runCli(["inspect", "const.System"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("System Pallet");
+  });
+
+  test("inspect polkadot.events.Balances.Transfer inspects the event", async () => {
+    const { stdout, exitCode } = await runCli(["inspect", "polkadot.events.Balances.Transfer"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("(Event)");
+    expect(stdout).toContain("Fields:");
+  });
+
   // --json output tests
   test("--json lists all pallets as JSON", async () => {
     const { stdout, exitCode } = await runCli(["inspect", "--json"]);
