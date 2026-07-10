@@ -1,5 +1,12 @@
 # polkadot-cli
 
+## 1.23.0
+
+### Minor Changes
+
+- 516c08d: Make `dot inspect` (and its `explore` alias) forgiving about dot-paths. Previously `dot inspect polkadot.tx.System.remark` threw `Invalid target ... Expected format: Pallet, Pallet.Item, or Chain.Pallet.Item` even though that exact path is valid for _invoking_ a call — `inspect` had no notion of a `kind` segment. Now `parseTarget` (under `allowPalletOnly`) tolerates and ignores a `kind` segment (`tx`/`query`/`const`/`events`/`errors` and their aliases) appearing right after an optional chain prefix, so `dot inspect polkadot.tx.System.remark` describes the `System.remark` call just like `dot inspect polkadot.System.remark`. Partial paths continue to degrade to discovery rather than erroring (`dot inspect polkadot.query.System` lists the pallet's items). Genuinely-malformed input still errors with a helpful message. Closes #255.
+- d6f6c9e: Add git/cargo-style external subcommand dispatch (plugins). When the first CLI token is not a built-in command, category, or dot-path, `dot <name> …` looks for an executable named `dot-<name>` on PATH and runs it with the remaining arguments forwarded verbatim, stdio inherited, and the plugin's exit code passed through. Plugins receive `DOT_BIN` pointing at the dispatching `dot` entry script (cargo's `CARGO` convention) so they can call back into the same installation. Dotted tokens (`foo.bar`) and file paths are never dispatched, so dot-path syntax and file input are unaffected; built-in commands always win over a same-named plugin. Unknown-command errors now mention the `dot-<name>` convention when the token could have been a plugin.
+
 ## 1.22.0
 
 ### Minor Changes
