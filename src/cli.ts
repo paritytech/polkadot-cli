@@ -23,6 +23,11 @@ import { handleTx } from "./commands/tx.ts";
 import { registerWorkspaceCommands } from "./commands/workspace.ts";
 import { loadConfig } from "./config/store.ts";
 import { isGlobalDryRun, printGlobalDryRunHint, resolveDryRun } from "./core/dry-run.ts";
+import {
+  findExternalCommand,
+  isExternalCommandCandidate,
+  runExternalCommand,
+} from "./core/external-command.ts";
 import { isFilePath, loadCommandFile, parseVarFlags } from "./core/file-loader.ts";
 import {
   getUpdateNotification,
@@ -209,8 +214,21 @@ if (process.argv[2] === "__complete") {
         try {
           parsed = parseDotPath(dotpath, knownChains);
         } catch {
+          // External plugin dispatch (git/cargo-style): `dot foo …` execs
+          // `dot-foo …` if found on PATH. Only when the unknown word is the
+          // first CLI token, so the forwarded argv is exactly what the user
+          // typed after the plugin name (flags untouched by our parsing).
+          if (process.argv[2] === dotpath) {
+            const externalBin = findExternalCommand(dotpath);
+            if (externalBin) {
+              process.exit(runExternalCommand(externalBin, process.argv.slice(3)));
+            }
+          }
+          const pluginHint = isExternalCommandCandidate(dotpath)
+            ? ` No "dot-${dotpath}" plugin found on PATH.`
+            : "";
           throw new CliError(
-            `Unknown command "${dotpath}". Run "dot --help" for available commands.`,
+            `Unknown command "${dotpath}". Run "dot --help" for available commands.${pluginHint}`,
           );
         }
 
@@ -414,6 +432,11 @@ if (process.argv[2] === "__complete") {
     console.log("  init               Initialize a local .polkadot workspace in this directory");
     console.log(
       "  which              Show the active config root (workspace, DOT_HOME, or global)",
+    );
+    console.log();
+    console.log("Plugins:");
+    console.log(
+      '  dot <name> …       Runs a "dot-<name>" executable found on PATH (git/cargo-style)',
     );
     console.log();
     console.log("Global options:");

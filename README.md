@@ -81,6 +81,24 @@ To pull the latest skill updates:
 /plugin marketplace update polkadot-cli
 ```
 
+## Plugins
+
+`dot` supports git/cargo-style external subcommands: any executable named `dot-<name>` on your PATH runs as `dot <name>`, with the remaining arguments forwarded verbatim, stdio inherited, and the plugin's exit code passed through.
+
+```bash
+npm install -g dot-example     # ships a `dot-example` binary
+dot example status --json      # runs: dot-example status --json
+```
+
+This is how domain-specific tooling extends `dot` without the CLI loading third-party code into its own process. Plugins are ordinary child processes — the intended pattern is that a plugin invokes `dot` itself for anything chain- or signing-related (e.g. `dot tx.… --from <account>`), so key handling stays inside `dot`.
+
+Plugins receive a `DOT_BIN` environment variable pointing at the entry script of the `dot` that dispatched them (the same convention as cargo's `CARGO`), so they can invoke the exact same installation rather than whatever `dot` is first on PATH.
+
+Notes:
+
+- Only a bare first token dispatches: `dot foo.bar` is always dot-path syntax, `./file.yaml` is always file input — neither will hit the plugin lookup.
+- Built-in commands and categories always win over a plugin of the same name.
+
 ## Usage
 
 ### Manage chains
