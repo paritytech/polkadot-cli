@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { patchStdout } from "../test-helpers/patch-stdout.ts";
@@ -77,6 +85,31 @@ describe("initWorkspace", () => {
         expect(result.warnings).toHaveLength(1);
         expect(result.warnings[0]).toContain(`shadows ${join(parent, ".polkadot")}`);
         expect(existsSync(join(nested, ".polkadot"))).toBe(true);
+      },
+      { DOT_HOME: undefined },
+    );
+  });
+
+  test("warns that custom chains in the shadowed global config will disappear", async () => {
+    const home = scratch("dot-init-shadow-chains-");
+    const cwd = join(home, "project");
+    mkdirSync(cwd);
+    // Simulate chains previously added to the global config that the new
+    // workspace is about to shadow — a builtin plus a user-added chain.
+    mkdirSync(join(home, ".polkadot"), { recursive: true });
+    writeFileSync(
+      join(home, ".polkadot", "config.json"),
+      JSON.stringify({ chains: { polkadot: { rpc: "wss://x" }, mychain: { rpc: "wss://y" } } }),
+    );
+    await withDotHome(
+      "ignored",
+      async () => {
+        const result = await initWorkspace(cwd, home);
+        expect(result.warnings).toHaveLength(1);
+        expect(result.warnings[0]).toContain("1 custom chain(s)");
+        expect(result.warnings[0]).toContain("mychain");
+        // The builtin must not be counted as a custom chain.
+        expect(result.warnings[0]).not.toContain("polkadot,");
       },
       { DOT_HOME: undefined },
     );

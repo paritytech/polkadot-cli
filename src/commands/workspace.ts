@@ -2,7 +2,8 @@ import { mkdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { CAC } from "cac";
-import { type ResolvedConfigDir, resolveConfigDir } from "../config/store.ts";
+import { peekConfiguredChains, type ResolvedConfigDir, resolveConfigDir } from "../config/store.ts";
+import { BUILTIN_CHAIN_NAMES } from "../config/types.ts";
 import { canonicalPath, findWorkspace, WORKSPACE_DIR_NAME } from "../config/workspace.ts";
 import { isJsonOutput, writeStdout } from "../core/output.ts";
 import { withHelp } from "../platform/cli.ts";
@@ -50,6 +51,23 @@ export async function initWorkspace(cwd: string, home: string = homedir()): Prom
     warnings.push(
       `DOT_HOME is set (${dotHome}) and takes precedence — this workspace will not be picked up until you unset it.`,
     );
+  } else {
+    // With no DOT_HOME the new workspace becomes the active root, shadowing
+    // whatever was resolved from here before it existed (a parent workspace,
+    // or the global ~/.polkadot). Chains added there won't be visible from
+    // this workspace even though they remain on disk — warn so it isn't a
+    // silent disappearance (the exact footgun this warning exists to prevent).
+    const shadowedPath = parentWorkspace ?? join(home, WORKSPACE_DIR_NAME);
+    const userChains = (await peekConfiguredChains(shadowedPath)).filter(
+      (name) => !BUILTIN_CHAIN_NAMES.has(name),
+    );
+    if (userChains.length > 0) {
+      warnings.push(
+        `${userChains.length} custom chain(s) in the shadowed config ${shadowedPath} ` +
+          `(${userChains.join(", ")}) will not be visible from this workspace. ` +
+          "Re-add them here, or migrate with `dot chain export` / `dot chain import`.",
+      );
+    }
   }
 
   await mkdir(workspacePath, { recursive: true });

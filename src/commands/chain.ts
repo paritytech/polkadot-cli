@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import type { CAC } from "cac";
 import {
+  describeConfigDir,
   findChainName,
   loadConfig,
   loadMetadataFingerprint,
@@ -233,7 +234,7 @@ async function chainAdd(
     if (isJsonOutput(opts)) {
       console.log(formatJson(result));
     } else {
-      console.log(`Chain "${name}" added successfully.`);
+      console.log(`Chain "${name}" added successfully to ${describeConfigDir()}.`);
     }
   } finally {
     clientHandle.destroy();
@@ -277,7 +278,7 @@ async function chainRemove(
   if (isJsonOutput(opts)) {
     console.log(formatJson({ action: "removed", chain: resolved }));
   } else {
-    console.log(`Chain "${resolved}" removed.`);
+    console.log(`Chain "${resolved}" removed from ${describeConfigDir()}.`);
   }
 }
 
@@ -298,6 +299,7 @@ async function chainList(opts: { output?: string; json?: boolean; verbose?: bool
   const verbose = opts.verbose === true;
 
   printHeading("Configured Chains");
+  console.log(`  ${DIM}${describeConfigDir()}${RESET}\n`);
 
   const parachainsByRelay = new Map<string, [string, ChainConfig][]>();
   const standalone: [string, ChainConfig][] = [];
