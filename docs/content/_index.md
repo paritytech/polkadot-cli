@@ -27,7 +27,7 @@ A command-line tool for interacting with Polkadot-ecosystem chains. Manage chain
 - ✅ Message signing — sign arbitrary bytes with account keypairs for use as `MultiSignature` arguments
 - ✅ Bandersnatch member keys — derive Ring VRF member keys from mnemonics for on-chain member sets
 - ✅ Export/import — portable chain and account configuration for backup, sharing, and CI bootstrapping
-- ✅ Claude Code skill — `dot-cli` skill installable as a plugin marketplace, teaches agents how to drive the CLI
+- ✅ Agent skill — bundled `dot-cli` skill teaches coding agents (Claude Code, Codex) how to drive the CLI; install with `dot skill install --codex`/`--claude`
 
 ## Install
 
@@ -39,11 +39,29 @@ npm install -g polkadot-cli@latest
 
 This installs the `dot` command globally. Ships with Polkadot and all system parachains preconfigured with multiple fallback RPC endpoints. Add any Substrate-based chain by pointing to its RPC endpoint(s).
 
-## Claude Code skill
+## Agent skill (Claude Code & Codex)
 
-This repo ships a [Claude Code](https://claude.com/claude-code) skill — a piece of context Claude can load on-demand that teaches it how to drive the `dot` CLI correctly: query patterns, tx encoding, runtime API calls, and the bash scripting gotchas that trip up agents (missing-key `undefined` sentinel, u128 values returned as quoted strings, XCM `Location` JSON shapes, etc.).
+This repo ships an agent skill — a piece of context coding agents load on-demand that teaches them how to drive the `dot` CLI correctly: query patterns, tx encoding, runtime API calls, and the bash scripting gotchas that trip up agents (missing-key `undefined` sentinel, u128 values returned as quoted strings, XCM `Location` JSON shapes, etc.). The skill auto-triggers when you ask an agent about `dot`, polkadot-cli, Substrate storage queries, extrinsic submission, runtime APIs, or XCM.
 
-### Install
+The skill is bundled into the `dot` binary, so it's always version-matched to your install — the `dot skill` command is its distribution channel:
+
+```
+dot skill show                # print SKILL.md to stdout
+dot skill show --references   # plus the bundled reference docs
+dot skill path                # where each agent's copy would live
+```
+
+All `dot skill` subcommands support `--json` for machine-readable output.
+
+### Codex CLI
+
+```
+dot skill install --codex
+```
+
+This writes the skill to `~/.agents/skills/dot-cli`, where Codex auto-discovers it. Restart Codex if it doesn't pick the skill up immediately.
+
+### Claude Code
 
 Register this repo as a plugin marketplace in Claude Code, then install the skill:
 
@@ -52,11 +70,28 @@ Register this repo as a plugin marketplace in Claude Code, then install the skil
 /plugin install dot-cli@polkadot-cli
 ```
 
-The skill auto-triggers when you ask Claude about `dot`, polkadot-cli, Substrate storage queries, extrinsic submission, runtime APIs, or XCM. You can also invoke it directly with `/dot-cli`.
+You can also invoke it directly with `/dot-cli`.
+
+Alternatively, install the binary-bundled copy without the marketplace:
+
+```
+dot skill install --claude    # -> ~/.claude/skills/dot-cli
+```
+
+### Install targets
+
+| Flag | Destination |
+|------|-------------|
+| `--codex` | `~/.agents/skills/dot-cli` (Codex CLI) |
+| `--claude` | `~/.claude/skills/dot-cli` (Claude Code) |
+| `--local` | current repo (`./.agents/skills` / `./.claude/skills`) instead of your home directory |
+| `--path <dir>` | explicit directory (`<dir>/dot-cli`) |
 
 ### Update
 
-To pull the latest skill content after the repo publishes a new version:
+After upgrading `dot` (`npm install -g polkadot-cli@latest`), re-run `dot skill install --codex`/`--claude` to refresh the installed copy to the new version. Installed copies carry the CLI version in their frontmatter (`version:`), so an agent can spot a stale skill by comparing it against `dot --version`.
+
+For marketplace installs, pull the latest skill content after the repo publishes a new version:
 
 ```
 /plugin marketplace update polkadot-cli
@@ -66,7 +101,7 @@ If auto-update is enabled on this marketplace in Claude Code, the skill refreshe
 
 ### Layout
 
-The skill lives alongside the CLI source so it can be kept in lockstep with the commands it documents:
+The skill lives alongside the CLI source so it can be kept in lockstep with the commands it documents — the same files are bundled into the binary at build time and served by the Claude Code marketplace:
 
 ```
 polkadot-cli/

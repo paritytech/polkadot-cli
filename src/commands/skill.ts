@@ -10,6 +10,7 @@ import scriptingPatternsMd from "../../dot-cli/references/scripting-patterns.md"
 // distribution channel: `dot skill install` always writes the version that
 // matches the running CLI (the same files the Claude Code marketplace serves).
 import skillMd from "../../dot-cli/SKILL.md" with { type: "text" };
+import { version } from "../../package.json";
 import { isJsonOutput, writeStdout } from "../core/output.ts";
 import { withHelp } from "../platform/cli.ts";
 import { CliError } from "../utils/errors.ts";
@@ -24,11 +25,22 @@ export interface SkillFile {
 }
 
 /**
+ * Stamp the CLI version into the SKILL.md frontmatter. Copies written by
+ * `dot skill install` (or printed by `dot skill show`) carry the version of
+ * the binary that produced them, so an agent can compare it against
+ * `dot --version` and detect a stale skill. The source file in `dot-cli/`
+ * stays unstamped — the marketplace serves it raw and versions it itself.
+ */
+function stampVersion(content: string): string {
+  return content.replace(/^name: dot-cli$/m, `name: dot-cli\nversion: ${version}`);
+}
+
+/**
  * The complete skill, in the order it should be installed/printed. The first
  * entry is `SKILL.md`; the rest are bundled reference docs it links to.
  */
 export const SKILL_FILES: SkillFile[] = [
-  { rel: "SKILL.md", content: skillMd },
+  { rel: "SKILL.md", content: stampVersion(skillMd) },
   { rel: "references/scripting-patterns.md", content: scriptingPatternsMd },
 ];
 

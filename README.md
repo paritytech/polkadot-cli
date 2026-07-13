@@ -98,7 +98,7 @@ Alternatively, install the binary-bundled copy without the marketplace:
 dot skill install --claude    # -> ~/.claude/skills/dot-cli
 ```
 
-After upgrading `dot` (`npm install -g polkadot-cli@latest`), re-run `dot skill install --codex`/`--claude` to refresh the installed skill. Run `dot skill path` to see where each agent's copy lives.
+After upgrading `dot` (`npm install -g polkadot-cli@latest`), re-run `dot skill install --codex`/`--claude` to refresh the installed skill. Run `dot skill path` to see where each agent's copy lives. Installed copies carry the CLI version in their frontmatter (`version:`), so an agent can spot a stale skill by comparing it against `dot --version`.
 
 ## Plugins
 

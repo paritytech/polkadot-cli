@@ -14,7 +14,7 @@ description: >
 
 Unified CLI for Polkadot/Substrate chains. Install: `npm install -g polkadot-cli@latest`
 
-> This skill ships with the `dot` CLI. After upgrading `dot`, re-run `dot skill install --codex` (or `--claude`) to refresh it to the matching version.
+> This skill ships with the `dot` CLI. Copies installed via `dot skill install` carry a `version:` field in the frontmatter above — if it differs from `dot --version`, this skill is stale: suggest re-running `dot skill install --codex` (or `--claude`) to refresh it to the matching version.
 
 ## Core Pattern
 
