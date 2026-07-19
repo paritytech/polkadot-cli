@@ -19,6 +19,7 @@ import { registerParachainCommand } from "./commands/parachain.ts";
 import { handleQuery } from "./commands/query.ts";
 import { handleRpc } from "./commands/rpc.ts";
 import { registerSignCommand } from "./commands/sign.ts";
+import { registerSkillCommand } from "./commands/skill.ts";
 import { handleTx } from "./commands/tx.ts";
 import { registerWorkspaceCommands } from "./commands/workspace.ts";
 import { loadConfig } from "./config/store.ts";
@@ -76,6 +77,7 @@ if (process.argv[2] === "__complete") {
   registerSignCommand(cli);
   registerParachainCommand(cli);
   registerCompletionsCommand(cli);
+  registerSkillCommand(cli);
   registerVerifiableCommands(cli);
   registerWorkspaceCommands(cli);
 
@@ -429,6 +431,7 @@ if (process.argv[2] === "__complete") {
     );
     console.log("  verifiable         Bandersnatch member keys, ring-VRF proofs, sign/verify");
     console.log("  completions <sh>   Generate shell completions (zsh, bash, fish)");
+    console.log("  skill              Print/install the Claude skill baked into this binary");
     console.log("  init               Initialize a local .polkadot workspace in this directory");
     console.log(
       "  which              Show the active config root (workspace, DOT_HOME, or global)",

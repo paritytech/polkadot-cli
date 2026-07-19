@@ -2145,6 +2145,23 @@ dot chain <Tab>          # → add, remove, update, list
 
 Completions are context-aware: `query.` shows pallets with storage items, `tx.` shows pallets with calls, `events.` and `errors.` filter accordingly, `apis.` shows runtime API names. Chain prefix paths like `polkadot.query.System.` work at any depth.
 
+### Claude skill (AI agents)
+
+`dot` ships with a [Claude Code](https://claude.com/claude-code) skill (`SKILL.md`) that teaches AI agents how to drive the CLI. The skill is **baked into the binary**, so the version you print or install always matches the `dot` you have installed — no separate update step, no drift between the CLI and its AI-facing docs.
+
+```bash
+# Print the skill that ships with THIS binary version
+dot skill
+
+# Install it for Claude Code (writes ~/.claude/skills/dot-cli/SKILL.md)
+dot skill install
+
+# Install to a custom path instead
+dot skill install --path ./SKILL.md
+```
+
+Because the skill is embedded at build time, upgrading the CLI upgrades the skill: run `npm install -g polkadot-cli@latest` then `dot skill install` again, and the installed skill matches the new binary. After installing, restart Claude Code (or start a new session) to pick up the skill.
+
 ## How it compares
 
 | | polkadot-cli | @polkadot/api-cli | subxt-cli | Pop CLI |

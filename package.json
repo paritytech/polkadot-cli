@@ -11,7 +11,8 @@
   ],
   "scripts": {
     "dev": "bun src/cli.ts",
-    "build": "bun build src/cli.ts --outfile dist/cli.mjs --target node --packages external && bun run build:shebang",
+    "generate:skill": "bun scripts/generate-skill-md.ts",
+    "build": "bun run generate:skill && bun build src/cli.ts --outfile dist/cli.mjs --target node --packages external && bun run build:shebang",
     "build:shebang": "bun -e \"const f='dist/cli.mjs'; const s=await Bun.file(f).text(); await Bun.write(f, s.replace('#!/usr/bin/env bun', '#!/usr/bin/env node').replace('// @bun\\n',''))\"",
     "prepublishOnly": "bun run build",
     "typecheck": "tsc --noEmit",

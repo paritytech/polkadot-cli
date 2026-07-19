@@ -64,6 +64,18 @@ To pull the latest skill content after the repo publishes a new version:
 
 If auto-update is enabled on this marketplace in Claude Code, the skill refreshes on startup.
 
+### Install from the binary (`dot skill`)
+
+The same skill is **baked into the `dot` binary**, so you can print or install the version that ships with your installed CLI — no marketplace round-trip, and no drift between the CLI and its AI-facing docs:
+
+```bash
+dot skill                       # print the SKILL.md baked into THIS binary
+dot skill install               # write it to ~/.claude/skills/dot-cli/SKILL.md
+dot skill install --path ./S.md # write to a custom path instead
+```
+
+Because the skill is embedded at build time, the binary is the single source of AI-facing truth: upgrade with `npm install -g polkadot-cli@latest`, run `dot skill install` again, and the installed skill matches the new binary exactly. After installing, restart Claude Code (or start a new session) to pick up the skill.
+
 ### Layout
 
 The skill lives alongside the CLI source so it can be kept in lockstep with the commands it documents:
