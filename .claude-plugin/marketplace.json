@@ -1,8 +1,8 @@
 {
   "name": "polkadot-cli",
   "owner": {
-    "name": "peetzweg",
-    "email": "phil.czek@gmail.com"
+    "name": "paritytech",
+    "email": "philip.poloczek@parity.io"
   },
   "metadata": {
     "description": "Claude Code skill for the polkadot-cli (`dot`) CLI — query, tx, runtime APIs, and scripting patterns for Polkadot/Substrate chains.",

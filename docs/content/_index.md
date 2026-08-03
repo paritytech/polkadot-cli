@@ -1,6 +1,6 @@
 # polkadot-cli
 
-A command-line tool for interacting with Polkadot-ecosystem chains. Manage chains and accounts, query storage, look up constants, inspect metadata, submit extrinsics, and compute hashes — all from your terminal. [View on GitHub](https://github.com/peetzweg/polkadot-cli).
+A command-line tool for interacting with Polkadot-ecosystem chains. Manage chains and accounts, query storage, look up constants, inspect metadata, submit extrinsics, and compute hashes — all from your terminal. [View on GitHub](https://github.com/paritytech/polkadot-cli).
 
 ## Features
 
@@ -2525,7 +2525,7 @@ Pre-req: metadata cached for the chain (`dot chain update polkadot`). There is n
 
 ### Legacy `dot parachain` (deprecated)
 
-The earlier standalone `dot parachain <paraId>` command is **preserved for backward compatibility** and prints a deprecation warning to stderr. Stdout is byte-identical to prior releases — pipes such as `dot parachain 2004 --json | jq -r '.child.ss58'` keep working unchanged. Migrate to `dot account inspect --parachain <id> --parachain-type <child|sibling>` at your convenience. Tracked for removal in a future release ([#208](https://github.com/peetzweg/polkadot-cli/issues/208)).
+The earlier standalone `dot parachain <paraId>` command is **preserved for backward compatibility** and prints a deprecation warning to stderr. Stdout is byte-identical to prior releases — pipes such as `dot parachain 2004 --json | jq -r '.child.ss58'` keep working unchanged. Migrate to `dot account inspect --parachain <id> --parachain-type <child|sibling>` at your convenience. Tracked for removal in a future release ([#208](https://github.com/paritytech/polkadot-cli/issues/208)).
 
 ```bash
 # Old (deprecated alias — still works, emits stderr warning)

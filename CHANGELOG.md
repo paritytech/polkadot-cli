@@ -370,7 +370,7 @@ codeHash)` against the live runtime — if they diverge it appends the
   dot account inspect --parachain 1000 --parachain-type child --json
   ```
 
-  Tracked for removal in a future release: [#208](https://github.com/peetzweg/polkadot-cli/issues/208).
+  Tracked for removal in a future release: [#208](https://github.com/paritytech/polkadot-cli/issues/208).
 
 ## 1.17.0
 
@@ -516,7 +516,7 @@ codeHash)` against the live runtime — if they diverge it appends the
 
   **`dot metadata <chain>`**
 
-  A new top-level command that fetches a chain's runtime metadata and prints it as a single JSON blob with everything needed to drive the chain — pallets (with calls, events, errors, storage, constants), runtime APIs, transaction extensions, and a runtime fingerprint header (`specVersion`, `transactionVersion`, `codeHash`, etc.). Closes [#170](https://github.com/peetzweg/polkadot-cli/issues/170).
+  A new top-level command that fetches a chain's runtime metadata and prints it as a single JSON blob with everything needed to drive the chain — pallets (with calls, events, errors, storage, constants), runtime APIs, transaction extensions, and a runtime fingerprint header (`specVersion`, `transactionVersion`, `codeHash`, etc.). Closes [#170](https://github.com/paritytech/polkadot-cli/issues/170).
 
   ```bash
   dot metadata polkadot                  # decoded JSON, fetched fresh from the chain
@@ -630,7 +630,7 @@ codeHash)` against the live runtime — if they diverge it appends the
   Install:
 
   ```
-  /plugin marketplace add peetzweg/polkadot-cli
+  /plugin marketplace add paritytech/polkadot-cli
   /plugin install dot-cli@polkadot-cli
   ```
 

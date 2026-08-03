@@ -1,7 +1,7 @@
 // DEPRECATED: superseded by `dot account inspect --parachain <id> --parachain-type <type>`.
 // Kept verbatim so production scripts pinned to the old surface keep working; stdout is
 // byte-identical to pre-deprecation behaviour. Tracked for removal:
-// https://github.com/peetzweg/polkadot-cli/issues/208
+// https://github.com/paritytech/polkadot-cli/issues/208
 import type { CAC } from "cac";
 import { publicKeyToHex, toSs58 } from "../core/accounts.ts";
 import { BOLD, CYAN, DIM, formatJson, isJsonOutput, printHeading, RESET } from "../core/output.ts";
