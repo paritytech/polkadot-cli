@@ -8,7 +8,7 @@ The skill markdown is now bundled into the `dot` binary, making the installed CL
 
 - `dot skill show` — print the guide to stdout (`--references` includes bundled reference docs).
 - `dot skill install --codex` — install into `~/.agents/skills/dot-cli` (Codex auto-discovers it).
-- `dot skill install --claude` — install into `~/.claude/skills/dot-cli` (the Claude Code plugin marketplace still works too).
+- `dot skill install --claude` — install into `~/.claude/skills/dot-cli`. This is now the recommended path for Claude Code: it registers the skill under the short name `dot-cli` (invokable as `/dot-cli`), whereas the still-supported plugin marketplace registers the more verbose `dot-cli:dot-cli`. Pick one method to avoid duplicate copies.
 - `--local` installs into the current repo, `--path <dir>` into an explicit directory, and `dot skill path` prints where each agent's copy lives.
 
 Freshness comes from re-running `dot skill install` after upgrading `dot` — the design does not rely on an agent self-invoking a command from the skill text. Closes #278.
