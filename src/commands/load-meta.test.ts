@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 // Installs spread-based polkadot-api mocks and captures the real
 // createChainClient BEFORE this file stubs the whole client.ts module —
@@ -48,6 +49,8 @@ mock.module("../core/metadata.ts", () => ({
 
 // Import loadMeta AFTER mocks are set up
 const { loadMeta } = await import("./focused-inspect.ts");
+const { saveMetadata } = await import("../config/store.ts");
+const { withDotHome } = await import("../test-helpers/with-dot-home.ts");
 
 // ---------------------------------------------------------------------------
 // loadMeta — --rpc override bypasses metadata cache
@@ -80,18 +83,27 @@ describe("loadMeta", () => {
   });
 
   test("uses cache when no rpcOverride is provided", async () => {
-    mockCreateChainClient.mockClear();
-    mockFetchMetadataFromChain.mockClear();
-
     // Without rpcOverride, loadMeta calls getOrFetchMetadata(chainName) which
-    // reads from cache. The real getOrFetchMetadata calls the real loadMetadata
-    // from store.ts — if cached metadata exists on disk, no client is created.
-    const meta = await loadMeta("polkadot", chainConfig);
+    // reads from the on-disk cache. Seed that cache in an isolated DOT_HOME —
+    // relying on another test file to have populated the shared store is a
+    // scheduling race under --concurrent (issue #285).
+    const tmpHome = realpathSync(mkdtempSync(join(tmpdir(), "dot-load-meta-")));
+    try {
+      await withDotHome(tmpHome, async () => {
+        await saveMetadata("polkadot", FIXTURE_METADATA);
+        mockCreateChainClient.mockClear();
+        mockFetchMetadataFromChain.mockClear();
 
-    expect(meta).toBeDefined();
-    expect(meta.unified).toBeDefined();
-    // Cache hit — no client created, no network fetch
-    expect(mockCreateChainClient).not.toHaveBeenCalled();
-    expect(mockFetchMetadataFromChain).not.toHaveBeenCalled();
+        const meta = await loadMeta("polkadot", chainConfig);
+
+        expect(meta).toBeDefined();
+        expect(meta.unified).toBeDefined();
+        // Cache hit — no client created, no network fetch
+        expect(mockCreateChainClient).not.toHaveBeenCalled();
+        expect(mockFetchMetadataFromChain).not.toHaveBeenCalled();
+      });
+    } finally {
+      rmSync(tmpHome, { recursive: true, force: true });
+    }
   });
 });

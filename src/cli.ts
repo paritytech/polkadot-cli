@@ -19,6 +19,7 @@ import { registerParachainCommand } from "./commands/parachain.ts";
 import { handleQuery } from "./commands/query.ts";
 import { handleRpc } from "./commands/rpc.ts";
 import { registerSignCommand } from "./commands/sign.ts";
+import { registerSkillCommand } from "./commands/skill.ts";
 import { handleTx } from "./commands/tx.ts";
 import { registerWorkspaceCommands } from "./commands/workspace.ts";
 import { loadConfig } from "./config/store.ts";
@@ -78,6 +79,7 @@ if (process.argv[2] === "__complete") {
   registerCompletionsCommand(cli);
   registerVerifiableCommands(cli);
   registerWorkspaceCommands(cli);
+  registerSkillCommand(cli);
 
   // Default command: dot-path syntax for query, tx, const, events, errors
   cli
@@ -433,6 +435,7 @@ if (process.argv[2] === "__complete") {
     console.log(
       "  which              Show the active config root (workspace, DOT_HOME, or global)",
     );
+    console.log("  skill              Install/print the agent skill (Claude Code, Codex)");
     console.log();
     console.log("Plugins:");
     console.log(

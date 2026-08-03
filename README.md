@@ -33,7 +33,7 @@ Ships with Polkadot and all system parachains preconfigured with multiple fallba
 - ✅ Non-native fee payment — pay tx fees in any asset the chain accepts via `--asset` (asset-hub-style chains)
 - ✅ Bandersnatch member keys — derive Ring VRF member keys from mnemonics for on-chain member sets
 - ✅ Export/import — portable chain and account configuration for backup, sharing, and CI bootstrapping
-- ✅ Claude Code skill — `dot-cli` skill installable as a plugin marketplace, teaches agents how to drive the CLI
+- ✅ Agent skill — bundled `dot-cli` skill teaches coding agents (Claude Code, Codex) how to drive the CLI; install with `dot skill install --codex`/`--claude`
 
 ### Preconfigured chains
 
@@ -62,24 +62,43 @@ npm install -g polkadot-cli@latest
 
 This installs the `dot` command globally.
 
-## Claude Code skill
+## Agent skill (Claude Code & Codex)
 
-This repo ships a [Claude Code](https://claude.com/claude-code) skill that teaches Claude how to drive the `dot` CLI — query patterns, tx encoding, runtime API calls, and bash scripting gotchas.
+`dot` ships a skill that teaches coding agents how to drive the CLI — query patterns, tx encoding, runtime API calls, and bash scripting gotchas. The skill auto-triggers when you ask about `dot`, Substrate storage queries, extrinsic submission, runtime APIs, or XCM.
 
-Register the marketplace and install the skill:
+The skill is bundled into the `dot` binary, so it's always version-matched to your install. Print it anywhere with:
+
+```bash
+dot skill show                # SKILL.md to stdout
+dot skill show --references   # plus the bundled reference docs
+```
+
+### Codex CLI
+
+```bash
+dot skill install --codex
+```
+
+This writes the skill to `~/.agents/skills/dot-cli`, where Codex auto-discovers it (use `--local` to install into `./.agents/skills` for the current repo instead). Restart Codex if it doesn't pick the skill up immediately.
+
+### Claude Code
+
+```bash
+dot skill install --claude    # -> ~/.claude/skills/dot-cli
+```
+
+This registers the skill under the short name `dot-cli`, invokable with `/dot-cli`.
+
+Alternatively, install via the plugin marketplace (registers as the more verbose `dot-cli:dot-cli`):
 
 ```
 /plugin marketplace add paritytech/polkadot-cli
 /plugin install dot-cli@polkadot-cli
 ```
 
-The skill auto-triggers when you ask Claude about `dot`, Substrate storage queries, extrinsic submission, runtime APIs, or XCM. You can also invoke it directly with `/dot-cli`.
+Pick one method — installing both ways leaves Claude Code with two copies of the same skill. Marketplace installs update with `/plugin marketplace update polkadot-cli`.
 
-To pull the latest skill updates:
-
-```
-/plugin marketplace update polkadot-cli
-```
+After upgrading `dot` (`npm install -g polkadot-cli@latest`), re-run `dot skill install --codex`/`--claude` to refresh the installed skill. Run `dot skill path` to see where each agent's copy lives. Installed copies carry the CLI version in their frontmatter (`version:`), so an agent can spot a stale skill by comparing it against `dot --version`.
 
 ## Plugins
 
