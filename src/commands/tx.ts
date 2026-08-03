@@ -5,7 +5,7 @@ import type { TxBestBlocksState, TxBroadcasted, TxEvent, TxFinalized } from "pol
 import { Binary } from "polkadot-api";
 import { stringify as stringifyYaml } from "yaml";
 import { loadConfig, resolveChain } from "../config/store.ts";
-import { primaryRpc } from "../config/types.ts";
+import { connectedEndpoint, primaryRpc } from "../config/types.ts";
 import { resolveAccountSigner, toSs58 } from "../core/accounts.ts";
 import { type ClientHandle, createChainClient } from "../core/client.ts";
 import { papiLink, pjsAppsLink } from "../core/explorers.ts";
@@ -32,6 +32,7 @@ import {
   GREEN,
   isJsonOutput,
   printHeading,
+  printHeadingWithEndpoint,
   printItem,
   printJsonLine,
   RED,
@@ -173,6 +174,7 @@ export async function handleTx(
   if (!target) {
     const config = await loadConfig();
     const { name: chainName, chain: chainConfig } = resolveChain(config, opts.chain);
+    const endpoint = connectedEndpoint(chainConfig.rpc, opts.rpc);
     const meta = await loadMeta(chainName, chainConfig, opts.rpc);
     const pallets = listPallets(meta);
     const withCalls = pallets.filter((p) => p.calls.length > 0);
@@ -181,13 +183,14 @@ export async function handleTx(
       console.log(
         formatJson({
           chain: chainName,
+          rpc: endpoint,
           pallets: withCalls.map((p) => ({ name: p.name, calls: p.calls.length })),
         }),
       );
       return;
     }
 
-    printHeading(`Pallets with calls on ${chainName} (${withCalls.length})`);
+    printHeadingWithEndpoint(`Pallets with calls on ${chainName} (${withCalls.length})`, endpoint);
     for (const p of withCalls) {
       printItem(p.name, `${p.calls.length} calls`);
     }

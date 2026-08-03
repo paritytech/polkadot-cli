@@ -71,6 +71,15 @@ export function printHeading(text: string): void {
   console.log(`\n${BOLD}${text}${RESET}\n`);
 }
 
+/**
+ * Heading variant that appends the connected RPC endpoint in dimmed brackets,
+ * e.g. `Pallets on polkadot (67)  [wss://rpc.polkadot.io]`. Provides diagnostic
+ * value for `inspect`-style commands so it's clear where metadata came from.
+ */
+export function printHeadingWithEndpoint(text: string, endpoint: string): void {
+  console.log(`\n${BOLD}${text}${RESET}  ${DIM}[${endpoint}]${RESET}\n`);
+}
+
 export function printItem(name: string, description?: string): void {
   if (description) {
     console.log(`  ${CYAN}${name}${RESET}  ${DIM}${description}${RESET}`);

@@ -1073,11 +1073,13 @@ The chain is required: pass it with `--chain` or as a prefix on the inspect targ
 
 Output is **width-aware**: short type signatures stay on a single line, long ones expand across multiple lines with field names aligned by colon. Composite struct fields and call arguments are color-coded (cyan field names, yellow primitives, magenta container keywords like `Vec`/`Option`, green enum variants) when stdout is a TTY; piped output stays plain.
 
+The overview headers show the connected RPC endpoint in dimmed brackets (`[wss://…]`) — the `--rpc` override when given, otherwise the chain's primary configured endpoint — so it's clear where metadata came from. In `--json` output it appears as an `rpc` field. The same header treatment applies to the `dot tx` / `dot query` / `dot events` / `dot errors` / `dot extensions` listings.
+
 ```
 # Pallet detail — list storage, constants, calls, events, errors
 dot inspect polkadot.System
 # Output:
-# System Pallet
+# System Pallet  [wss://polkadot.ibp.network]
 #
 #   Storage Items:
 #     Account [map]
@@ -1136,6 +1138,8 @@ dot inspect polkadot.Balances.InsufficientBalance
 
 # List all pallets — single positional is read as a pallet name, so use --chain here
 dot inspect --chain polkadot
+# Output (header):
+# Pallets on polkadot (N)  [wss://polkadot.ibp.network]
 dot explore --chain polkadot          # alias
 ```
 

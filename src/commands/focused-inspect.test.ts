@@ -665,6 +665,52 @@ describe("stdout/stderr separation (pipe-safe output)", () => {
   });
 });
 
+describe("connected RPC endpoint in category headers (#164)", () => {
+  test("tx category header shows endpoint", async () => {
+    const { stdout, exitCode } = await runCli(["tx"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toMatch(/Pallets with calls on polkadot \(\d+\)\s+\[wss:\/\/[^\]]+\]/);
+  });
+
+  test("events category header shows endpoint", async () => {
+    const { stdout, exitCode } = await runCli(["events"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toMatch(/Pallets with events on polkadot \(\d+\)\s+\[wss:\/\/[^\]]+\]/);
+  });
+
+  test("errors category header shows endpoint", async () => {
+    const { stdout, exitCode } = await runCli(["errors"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toMatch(/Pallets with errors on polkadot \(\d+\)\s+\[wss:\/\/[^\]]+\]/);
+  });
+
+  test("query category header shows endpoint", async () => {
+    const { stdout, exitCode } = await runCli(["query"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toMatch(/Pallets with storage on polkadot \(\d+\)\s+\[wss:\/\/[^\]]+\]/);
+  });
+
+  test("extensions category header shows endpoint", async () => {
+    const { stdout, exitCode } = await runCli(["extensions"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toMatch(/Transaction extensions on polkadot \(\d+\)\s+\[wss:\/\/[^\]]+\]/);
+  });
+
+  test("category --json includes rpc endpoint field", async () => {
+    const { stdout, exitCode } = await runCli(["tx", "--json"]);
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.rpc).toMatch(/^wss:\/\//);
+  });
+
+  test("extensions --json includes rpc endpoint field", async () => {
+    const { stdout, exitCode } = await runCli(["extensions", "--json"]);
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.rpc).toMatch(/^wss:\/\//);
+  });
+});
+
 describe("dot extensions", () => {
   test("lists extensions with types", async () => {
     const { stdout, exitCode } = await runCli(["extensions"]);

@@ -1,5 +1,6 @@
 import type { CAC } from "cac";
 import { loadConfig, resolveChain } from "../config/store.ts";
+import { connectedEndpoint } from "../config/types.ts";
 import { createChainClient } from "../core/client.ts";
 import type { MetadataBundle } from "../core/metadata.ts";
 import {
@@ -22,6 +23,7 @@ import {
   isJsonOutput,
   printDocs,
   printHeading,
+  printHeadingWithEndpoint,
   printItem,
   RESET,
 } from "../core/output.ts";
@@ -59,6 +61,7 @@ export function registerInspectCommand(cli: CAC) {
         }
 
         const { name: chainName, chain: chainConfig } = resolveChain(config, effectiveChain);
+        const endpoint = connectedEndpoint(chainConfig.rpc, opts.rpc);
 
         let meta: MetadataBundle;
         if (opts.rpc) {
@@ -92,6 +95,7 @@ export function registerInspectCommand(cli: CAC) {
             console.log(
               formatJson({
                 chain: chainName,
+                rpc: endpoint,
                 pallets: pallets.map((p) => ({
                   name: p.name,
                   storage: p.storage.length,
@@ -105,7 +109,7 @@ export function registerInspectCommand(cli: CAC) {
             return;
           }
 
-          printHeading(`Pallets on ${chainName} (${pallets.length})`);
+          printHeadingWithEndpoint(`Pallets on ${chainName} (${pallets.length})`, endpoint);
           for (const p of pallets) {
             const counts = [];
             if (p.storage.length) counts.push(`${p.storage.length} storage`);
@@ -131,6 +135,7 @@ export function registerInspectCommand(cli: CAC) {
             console.log(
               formatJson({
                 chain: chainName,
+                rpc: endpoint,
                 pallet: pallet.name,
                 docs: pallet.docs,
                 storage: pallet.storage.map((s) => {
@@ -169,7 +174,7 @@ export function registerInspectCommand(cli: CAC) {
             return;
           }
 
-          printHeading(`${pallet.name} Pallet`);
+          printHeadingWithEndpoint(`${pallet.name} Pallet`, endpoint);
 
           if (pallet.docs.length) {
             printDocs(pallet.docs);

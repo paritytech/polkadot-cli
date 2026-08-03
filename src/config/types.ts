@@ -13,6 +13,15 @@ export function primaryRpc(rpc: string | string[]): string {
   return Array.isArray(rpc) ? rpc[0]! : rpc;
 }
 
+/**
+ * Resolve the RPC endpoint the CLI connects to for a chain: an explicit
+ * `--rpc` override when given, otherwise the chain's primary configured
+ * endpoint. Used for diagnostic display (e.g. the `inspect` header).
+ */
+export function connectedEndpoint(rpc: string | string[], rpcOverride?: string): string {
+  return rpcOverride ?? primaryRpc(rpc);
+}
+
 export const DEFAULT_CONFIG: Config = {
   chains: {
     polkadot: {

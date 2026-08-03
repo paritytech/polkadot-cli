@@ -352,11 +352,13 @@ The default fetch always hits the chain and updates the local fingerprint sideca
 
 Output is **width-aware**: short signatures stay on one line, long ones expand across multiple lines with field names aligned by colon. Composite values are color-coded when stdout is a TTY; piped output stays plain.
 
+The overview headers show the connected RPC endpoint in dimmed brackets (`[wss://…]`) — the `--rpc` override if given, otherwise the chain's primary configured endpoint — so it's clear where metadata came from. With `--json` it's an `rpc` field. The same header applies to the `dot tx` / `dot query` / `dot events` / `dot errors` / `dot extensions` listings.
+
 ```bash
 # Pallet detail — list storage, constants, calls, events, errors
 dot inspect polkadot.System
 # Output:
-# System Pallet
+# System Pallet  [wss://polkadot.ibp.network]
 #
 #   Storage Items:
 #     Account [map]
@@ -402,6 +404,8 @@ dot inspect polkadot.Referenda.submit
 
 # To list all pallets on a chain, use --chain (a single positional is read as a pallet name)
 dot inspect --chain polkadot
+# Output (header):
+# Pallets on polkadot (N)  [wss://polkadot.ibp.network]
 ```
 
 A single positional arg is always treated as a pallet name, so `dot inspect polkadot` does **not** list pallets on the `polkadot` chain — use `--chain polkadot` for that.

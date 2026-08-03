@@ -838,11 +838,13 @@ Works offline from cached metadata after the first fetch. The chain is required.
 
 Output is **width-aware**: short type signatures stay on a single line, longer ones expand across multiple lines with field names aligned. Composite struct fields, enum variants, and call arguments are color-coded (cyan field names, yellow primitives, magenta container keywords like `Vec`/`Option`, green enum variants) when stdout is a TTY; piped output stays plain.
 
+The overview headers also show the RPC endpoint the CLI connects to, in dimmed brackets (`[wss://…]`) — the `--rpc` override when given, otherwise the chain's primary configured endpoint. This makes it clear where metadata came from, which is handy when diagnosing wrong metadata resolution. In `--json` output it appears as an `rpc` field.
+
 ```bash
 # Pallet detail — list storage, constants, calls, events, and errors
 dot inspect polkadot.System
 # Output:
-# System Pallet
+# System Pallet  [wss://polkadot.ibp.network]
 #
 #   Storage Items:
 #     Account [map]
@@ -892,6 +894,8 @@ dot inspect polkadot.Balances.InsufficientBalance
 
 # List all pallets — single positional is read as a pallet name, so use --chain here
 dot inspect --chain polkadot
+# Output (header):
+# Pallets on polkadot (N)  [wss://polkadot.ibp.network]
 ```
 
 All listings — pallets, storage items, constants, calls, events, and errors — are sorted alphabetically, making it easy to find a specific item at a glance.

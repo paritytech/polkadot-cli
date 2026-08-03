@@ -25,6 +25,53 @@ describe("dot inspect", () => {
     expect(stdout).toContain("Pallets on polkadot");
   });
 
+  // --- Connected RPC endpoint in header (#164) ---
+
+  test("pallet list header shows connected RPC endpoint", async () => {
+    const { stdout, exitCode } = await runCli(["inspect", "--chain", "polkadot"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Pallets on polkadot");
+    // The chain's primary configured endpoint appears in brackets
+    expect(stdout).toMatch(/Pallets on polkadot \(\d+\)\s+\[wss:\/\/[^\]]+\]/);
+  });
+
+  test("pallet detail header shows connected RPC endpoint", async () => {
+    const { stdout, exitCode } = await runCli(["inspect", "System"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toMatch(/System Pallet\s+\[wss:\/\/[^\]]+\]/);
+  });
+
+  test("header endpoint reflects the chain's primary configured RPC", async () => {
+    const config = {
+      chains: {
+        kusama: { rpc: ["wss://kusama-primary.example/ws", "wss://kusama-backup.example"] },
+      },
+    };
+    // Use --json so we assert on the structured endpoint without needing the
+    // network (metadata is served from the cached test fixture).
+    const { stdout, exitCode } = await runCli(["inspect", "--chain", "kusama", "--json"], {
+      config,
+    });
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.rpc).toBe("wss://kusama-primary.example/ws");
+  });
+
+  test("--json pallet list includes rpc endpoint field", async () => {
+    const { stdout, exitCode } = await runCli(["inspect", "--chain", "polkadot", "--json"]);
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.rpc).toBeDefined();
+    expect(parsed.rpc).toMatch(/^wss:\/\//);
+  });
+
+  test("--json pallet detail includes rpc endpoint field", async () => {
+    const { stdout, exitCode } = await runCli(["inspect", "System", "--json"]);
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.rpc).toMatch(/^wss:\/\//);
+  });
+
   test("inspect System lists pallet items with types", async () => {
     const { stdout, exitCode } = await runCli(["inspect", "System"]);
     expect(exitCode).toBe(0);

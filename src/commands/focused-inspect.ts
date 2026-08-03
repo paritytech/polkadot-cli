@@ -1,4 +1,5 @@
 import { loadConfig, resolveChain } from "../config/store.ts";
+import { connectedEndpoint } from "../config/types.ts";
 import { createChainClient } from "../core/client.ts";
 import type { MetadataBundle, PalletInfo } from "../core/metadata.ts";
 import {
@@ -27,6 +28,7 @@ import {
   isJsonOutput,
   printDocs,
   printHeading,
+  printHeadingWithEndpoint,
   printItem,
   RESET,
 } from "../core/output.ts";
@@ -83,6 +85,7 @@ export async function handleCalls(
   if (!target) {
     const config = await loadConfig();
     const { name: chainName, chain: chainConfig } = resolveChain(config, opts.chain);
+    const endpoint = connectedEndpoint(chainConfig.rpc, opts.rpc);
     const meta = await loadMeta(chainName, chainConfig, opts.rpc);
     const pallets = listPallets(meta);
     const withCalls = pallets.filter((p) => p.calls.length > 0);
@@ -91,13 +94,14 @@ export async function handleCalls(
       console.log(
         formatJson({
           chain: chainName,
+          rpc: endpoint,
           pallets: withCalls.map((p) => ({ name: p.name, calls: p.calls.length })),
         }),
       );
       return;
     }
 
-    printHeading(`Pallets with calls on ${chainName} (${withCalls.length})`);
+    printHeadingWithEndpoint(`Pallets with calls on ${chainName} (${withCalls.length})`, endpoint);
     for (const p of withCalls) {
       printItem(p.name, `${p.calls.length} calls`);
     }
@@ -196,6 +200,7 @@ export async function handleEvents(
   if (!target) {
     const config = await loadConfig();
     const { name: chainName, chain: chainConfig } = resolveChain(config, opts.chain);
+    const endpoint = connectedEndpoint(chainConfig.rpc, opts.rpc);
     const meta = await loadMeta(chainName, chainConfig, opts.rpc);
     const pallets = listPallets(meta);
     const withEvents = pallets.filter((p) => p.events.length > 0);
@@ -204,13 +209,17 @@ export async function handleEvents(
       console.log(
         formatJson({
           chain: chainName,
+          rpc: endpoint,
           pallets: withEvents.map((p) => ({ name: p.name, events: p.events.length })),
         }),
       );
       return;
     }
 
-    printHeading(`Pallets with events on ${chainName} (${withEvents.length})`);
+    printHeadingWithEndpoint(
+      `Pallets with events on ${chainName} (${withEvents.length})`,
+      endpoint,
+    );
     for (const p of withEvents) {
       printItem(p.name, `${p.events.length} events`);
     }
@@ -309,6 +318,7 @@ export async function handleErrors(
   if (!target) {
     const config = await loadConfig();
     const { name: chainName, chain: chainConfig } = resolveChain(config, opts.chain);
+    const endpoint = connectedEndpoint(chainConfig.rpc, opts.rpc);
     const meta = await loadMeta(chainName, chainConfig, opts.rpc);
     const pallets = listPallets(meta);
     const withErrors = pallets.filter((p) => p.errors.length > 0);
@@ -317,13 +327,17 @@ export async function handleErrors(
       console.log(
         formatJson({
           chain: chainName,
+          rpc: endpoint,
           pallets: withErrors.map((p) => ({ name: p.name, errors: p.errors.length })),
         }),
       );
       return;
     }
 
-    printHeading(`Pallets with errors on ${chainName} (${withErrors.length})`);
+    printHeadingWithEndpoint(
+      `Pallets with errors on ${chainName} (${withErrors.length})`,
+      endpoint,
+    );
     for (const p of withErrors) {
       printItem(p.name, `${p.errors.length} errors`);
     }
@@ -407,6 +421,7 @@ export async function handleStorage(
   if (!target) {
     const config = await loadConfig();
     const { name: chainName, chain: chainConfig } = resolveChain(config, opts.chain);
+    const endpoint = connectedEndpoint(chainConfig.rpc, opts.rpc);
     const meta = await loadMeta(chainName, chainConfig, opts.rpc);
     const pallets = listPallets(meta);
     const withStorage = pallets.filter((p) => p.storage.length > 0);
@@ -415,13 +430,17 @@ export async function handleStorage(
       console.log(
         formatJson({
           chain: chainName,
+          rpc: endpoint,
           pallets: withStorage.map((p) => ({ name: p.name, storage: p.storage.length })),
         }),
       );
       return;
     }
 
-    printHeading(`Pallets with storage on ${chainName} (${withStorage.length})`);
+    printHeadingWithEndpoint(
+      `Pallets with storage on ${chainName} (${withStorage.length})`,
+      endpoint,
+    );
     for (const p of withStorage) {
       printItem(p.name, `${p.storage.length} storage`);
     }
@@ -772,6 +791,7 @@ export async function handleExtensions(
 ) {
   const config = await loadConfig();
   const { name: chainName, chain: chainConfig } = resolveChain(config, opts.chain);
+  const endpoint = connectedEndpoint(chainConfig.rpc, opts.rpc);
   const meta = await loadMeta(chainName, chainConfig, opts.rpc);
 
   if (!target) {
@@ -783,6 +803,7 @@ export async function handleExtensions(
       console.log(
         formatJson({
           chain: chainName,
+          rpc: endpoint,
           extensions: extensions.map((e) => ({
             identifier: e.identifier,
             valueType: e.valueType,
@@ -794,7 +815,10 @@ export async function handleExtensions(
       return;
     }
 
-    printHeading(`Transaction extensions on ${chainName} (${extensions.length})`);
+    printHeadingWithEndpoint(
+      `Transaction extensions on ${chainName} (${extensions.length})`,
+      endpoint,
+    );
     for (const e of extensions) {
       const tag = e.isBuiltin ? `${DIM}[builtin]${RESET}` : `${CYAN}[custom]${RESET}`;
       printItem(e.identifier, `${e.valueType}  ${tag}`);

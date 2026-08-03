@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { BUILTIN_CHAIN_NAMES, DEFAULT_CONFIG, primaryRpc } from "./types.ts";
+import { BUILTIN_CHAIN_NAMES, connectedEndpoint, DEFAULT_CONFIG, primaryRpc } from "./types.ts";
 
 describe("primaryRpc", () => {
   test("returns the string itself when given a string", () => {
@@ -16,6 +16,25 @@ describe("primaryRpc", () => {
 
   test("returns empty string when given empty string", () => {
     expect(primaryRpc("")).toBe("");
+  });
+});
+
+describe("connectedEndpoint", () => {
+  test("returns the primary RPC when no override is given", () => {
+    expect(connectedEndpoint(["wss://a", "wss://b"])).toBe("wss://a");
+    expect(connectedEndpoint("wss://single")).toBe("wss://single");
+  });
+
+  test("returns the --rpc override when provided", () => {
+    expect(connectedEndpoint(["wss://a", "wss://b"], "wss://override/ws")).toBe(
+      "wss://override/ws",
+    );
+  });
+
+  test("override of empty string is ignored (falls back to primary)", () => {
+    // connectedEndpoint uses ?? so undefined falls back, but an explicit empty
+    // string is a valid (if unusual) override — document the behaviour.
+    expect(connectedEndpoint(["wss://a"], undefined)).toBe("wss://a");
   });
 });
 

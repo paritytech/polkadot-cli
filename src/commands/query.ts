@@ -1,4 +1,5 @@
 import { loadConfig, resolveChain } from "../config/store.ts";
+import { connectedEndpoint } from "../config/types.ts";
 import { createChainClient } from "../core/client.ts";
 import type { MetadataBundle, StorageItemInfo } from "../core/metadata.ts";
 import {
@@ -18,6 +19,7 @@ import {
   formatPretty,
   isJsonOutput,
   printHeading,
+  printHeadingWithEndpoint,
   printItem,
   RESET,
   writeStdout,
@@ -45,6 +47,7 @@ export async function handleQuery(
   if (!target) {
     const config = await loadConfig();
     const { name: chainName, chain: chainConfig } = resolveChain(config, opts.chain);
+    const endpoint = connectedEndpoint(chainConfig.rpc, opts.rpc);
     const meta = await loadMeta(chainName, chainConfig, opts.rpc);
     const pallets = listPallets(meta);
     const withStorage = pallets.filter((p) => p.storage.length > 0);
@@ -53,13 +56,17 @@ export async function handleQuery(
       await writeStdout(
         `${formatJson({
           chain: chainName,
+          rpc: endpoint,
           pallets: withStorage.map((p) => ({ name: p.name, storage: p.storage.length })),
         })}\n`,
       );
       return;
     }
 
-    printHeading(`Pallets with storage on ${chainName} (${withStorage.length})`);
+    printHeadingWithEndpoint(
+      `Pallets with storage on ${chainName} (${withStorage.length})`,
+      endpoint,
+    );
     for (const p of withStorage) {
       printItem(p.name, `${p.storage.length} storage items`);
     }
