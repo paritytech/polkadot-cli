@@ -837,13 +837,20 @@ export async function handleExtensions(
   console.log(`  ${BOLD}Value type:${RESET}       ${valueType}`);
   console.log(`  ${BOLD}AdditionalSigned:${RESET} ${addSigType}`);
   console.log(
-    `  ${BOLD}Handled by:${RESET}       ${described.isBuiltin ? "polkadot-api (builtin)" : "user (custom — provide via --ext)"}`,
+    `  ${BOLD}Handled by:${RESET}       ${
+      described.isBuiltin
+        ? "polkadot-api (builtin) — filled in automatically, override with --ext"
+        : "user (custom — provide via --ext)"
+    }`,
   );
-  if (!described.isBuiltin) {
-    console.log();
-    console.log(`${BOLD}Usage:${RESET}`);
+  console.log();
+  console.log(`${BOLD}Usage:${RESET}`);
+  console.log(
+    `  dot ${chainName}.tx.<Pallet>.<Call> --from <acc> --ext '{"${described.identifier}":{"value":<v>}}'`,
+  );
+  if (described.isBuiltin) {
     console.log(
-      `  dot ${chainName}.tx.<Pallet>.<Call> --from <acc> --ext '{"${described.identifier}":{"value":<v>}}'`,
+      `  ${DIM}Builtin: polkadot-api sets a value by default; pass --ext only to override it.${RESET}`,
     );
   }
   console.log();

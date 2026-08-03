@@ -242,7 +242,7 @@ Use `--tip` to set a priority tip in plancks. `--nonce`, `--mortality`, and `--a
 dot polkadot.tx.System.remark 0xdead --from alice --tip 1000000 --dry-run
 ```
 
-For non-standard signed extensions, override with `--ext '{"<Identifier>":{"value":<v>}}'`. List the chain's extensions with `dot <chain>.extensions`.
+For signed extensions, override with `--ext '{"<Identifier>":{"value":<v>}}'`. This works for every extension the chain declares — non-standard `[custom]` ones and `polkadot-api` `[builtin]` ones alike (naming a builtin overrides the value PAPI would fill in; `--asset` is just sugar over overriding `ChargeAssetTxPayment`). List the chain's extensions with `dot <chain>.extensions`.
 
 ## Runtime APIs
 
