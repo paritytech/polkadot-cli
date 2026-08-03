@@ -42,7 +42,9 @@ ${BOLD}Options:${RESET}
   --message <data>      Message to sign / bind / verify (text or 0x hex)
   --file <path>         Read the message from a file (raw bytes)
   --stdin               Read the message from stdin
-  --members <hex|file>  SCALE-encoded Vec<[u8;32]> ring (prove/verify)
+  --members <keys|file> Ring members (prove/verify). Loose 32-byte keys
+                        (concatenated hex or comma-separated hex), a file, or
+                        the SCALE-encoded Vec<[u8;32]> from 'members' — any form.
   --root <hex>          768-byte ring root / commitment (verify)
   --proof <hex>         Ring-VRF proof bytes (verify)
   --signature <hex>     Bandersnatch signature (verify-sig)
@@ -106,7 +108,10 @@ export function registerVerifiableCommands(cli: CAC) {
     .option("--message <data>", "Message to sign/bind/verify (text or 0x hex)")
     .option("--file <path>", "Read message from a file (raw bytes)")
     .option("--stdin", "Read message from stdin")
-    .option("--members <hex|file>", "SCALE-encoded Vec<[u8;32]> ring (prove/verify)")
+    .option(
+      "--members <keys|file>",
+      "Ring members (prove/verify): loose/comma-separated 32-byte hex keys, a file, or the SCALE-encoded Vec<[u8;32]> from `members`",
+    )
     .option("--root <hex>", "768-byte ring root/commitment (verify)")
     .option("--proof <hex>", "Ring-VRF proof bytes (verify)")
     .option("--signature <hex>", "Bandersnatch signature (verify-sig)")

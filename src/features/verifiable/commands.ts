@@ -23,6 +23,7 @@ import {
 } from "../../platform/index.ts";
 import {
   bandersnatchSign,
+  canonicalizeMembers,
   DEFAULT_RING_EXPONENT,
   deriveAlias,
   deriveBandersnatchMember,
@@ -143,6 +144,34 @@ async function resolveBytesArg(
     return text.startsWith("0x") ? parseInputData(text) : new Uint8Array(buf);
   }
   throw new CliError(`${name} must be 0x-prefixed hex`);
+}
+
+/**
+ * Resolve a `--members` argument into the canonical SCALE-encoded `Vec<[u8;32]>`.
+ *
+ * Accepts, in order of preference:
+ * - a comma-separated list of 0x-hex member keys (`<m1>,<m2>,…`),
+ * - loose concatenated 32-byte keys (0x-hex or file), re-encoded automatically,
+ * - the pre-encoded blob from `dot verifiable members …` (passed through).
+ */
+async function resolveMembersArg(value: string): Promise<Uint8Array> {
+  if (value.includes(",")) {
+    const keys = value
+      .split(",")
+      .map((k) => k.trim())
+      .filter((k) => k.length > 0)
+      .map((k) => {
+        const bytes = parseInputData(k);
+        if (bytes.length !== 32) {
+          throw new CliError(`each --members key must be 32 bytes (got ${bytes.length}): ${k}`);
+        }
+        return bytes;
+      });
+    if (keys.length === 0) throw new CliError("--members had no keys after splitting on commas");
+    return encodeMembers(keys);
+  }
+  const bytes = await resolveBytesArg(value, "--members", true);
+  return canonicalizeMembers(bytes);
 }
 
 function resolveRingExponent(opts: VerifiableOpts) {
@@ -285,9 +314,19 @@ async function proveCmd(accountArg: string | undefined, opts: VerifiableOpts) {
   const ringExponent = resolveRingExponent(opts);
   const entropy = await resolveEntropy(account, opts.entropyKey);
   const context = encodeContext(contextStr);
-  const members = await resolveBytesArg(membersArg, "--members", true);
+  const members = await resolveMembersArg(membersArg);
 
-  const { proof, alias } = ringProve(ringExponent, entropy, members, context, message);
+  let proof: Uint8Array;
+  let alias: Uint8Array;
+  try {
+    ({ proof, alias } = ringProve(ringExponent, entropy, members, context, message));
+  } catch (err) {
+    throw new CliError(
+      `Failed to build ring-VRF proof: ${err instanceof Error ? err.message : String(err)}. ` +
+        `--members must be 32-byte member keys (loose hex, comma-separated hex, or the ` +
+        `SCALE-encoded blob from "dot verifiable members …").`,
+    );
+  }
   const result = {
     account,
     context: contextStr,
@@ -324,7 +363,7 @@ async function verifyCmd(opts: VerifiableOpts) {
   const context = encodeContext(contextStr);
   const source = opts.root
     ? { commitment: await resolveBytesArg(opts.root, "--root", true) }
-    : { members: await resolveBytesArg(opts.members!, "--members", true) };
+    : { members: await resolveMembersArg(opts.members!) };
 
   let aliasHex: string;
   try {

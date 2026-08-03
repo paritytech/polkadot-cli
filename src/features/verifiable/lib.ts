@@ -205,6 +205,32 @@ export function encodeMembers(members: Uint8Array[]): Uint8Array {
 }
 
 /**
+ * Normalize a `--members` byte input into the canonical SCALE-encoded
+ * `Vec<[u8; 32]>` that `one_shot`, `validate`, and `members_root` expect.
+ *
+ * Accepts either form transparently:
+ * - **Loose concatenation** — raw 32-byte member keys back-to-back with no
+ *   length prefix. Detected because its length is always a positive multiple of
+ *   32. Re-encoded via {@link encodeMembers}.
+ * - **Already SCALE-encoded** — a compact length prefix (1/2/4 bytes) followed
+ *   by the keys. Its total length is `prefix + 32·N`, which is never a multiple
+ *   of 32, so it falls through and is returned unchanged.
+ *
+ * This lets `prove`/`verify --members` accept the loose hex that the `members`
+ * subcommand emits keys for, not just the pre-encoded blob.
+ */
+export function canonicalizeMembers(bytes: Uint8Array): Uint8Array {
+  if (bytes.length > 0 && bytes.length % 32 === 0) {
+    const members: Uint8Array[] = [];
+    for (let offset = 0; offset < bytes.length; offset += 32) {
+      members.push(bytes.subarray(offset, offset + 32));
+    }
+    return encodeMembers(members);
+  }
+  return bytes;
+}
+
+/**
  * Encode a ring `--context` value to 32 bytes, zero-padded on the right to match
  * Solidity `bytes32("…")` (NOT space-padded). `0x`-prefixed input is hex,
  * otherwise UTF-8. Rejects inputs longer than 32 bytes.

@@ -1485,13 +1485,51 @@ Chains with non-standard signed extensions are auto-handled:
 - `Option<T>` → `None`
 - enum with `Disabled` variant → `Disabled`
 
-For manual override, use `--ext` with a JSON object:
+For manual override, use `--ext` with a JSON object keyed by extension identifier:
 
 ```bash
 dot polkadot.tx.System.remark 0xdeadbeef --from alice --ext '{"MyExtension":{"value":"..."}}'
 ```
 
-Not sure which extensions a chain exposes? Run `dot <chain>.extensions` (see [Transaction extensions](#transaction-extensions)) to list them all with value types and a `[builtin]` / `[custom]` marker.
+`--ext` is a **thin pass-through to polkadot-api's extension values** — it does no
+re-shaping of its own. That means *any* shape the runtime metadata describes for an
+extension is expressible here, not just the scalar shown above. Whatever
+`dot <chain>.extensions <Name>` reports as the value type is what `{"value": …}` must
+contain.
+
+**Passing enum / struct values.** Custom extensions are frequently enums (often wrapped
+in `Option<…>`). Enum values use the same tagged shape `dot` uses for call arguments:
+
+```jsonc
+{ "type": "<VariantName>", "value": <variant payload> }   // value omitted for fieldless variants
+```
+
+So a fieldless variant, a struct-bearing variant, and a nested combination look like:
+
+```bash
+# Fieldless variant — omit "value" entirely
+dot people.tx.Coinage.transfer app --from app \
+  --ext '{"AsCoinage":{"value":{"type":"AsCoin"}}}'
+
+# Variant carrying a struct — its fields go in the inner "value" object
+dot people.tx.Coinage.unload_recycler_into_coin … --from app \
+  --ext '{"AsCoinage":{"value":{"type":"AsUnloadTokenPeople","value":{
+            "proof":"0x<ring-vrf-proof>","period":0,"counter":0,
+            "alias_proofs":["0x<ring-vrf-proof>"]}}}}'
+```
+
+Pair this with `--dry-run` to encode and fee-estimate the tx without submitting, which is
+the fastest way to confirm a payload is shaped correctly.
+
+Not sure which extensions a chain exposes, or what an extension's value type looks like?
+Run `dot <chain>.extensions` to list them, or `dot <chain>.extensions <Name>` for the value
+type of one (see [Transaction extensions](#transaction-extensions)).
+
+> **Note:** values that must cryptographically bind the transaction itself — a proof or
+> signature over the tx's *inherited implication* (nonce, era, genesis, other extension
+> values) — cannot yet be assembled with `--ext` alone, because the CLI does not expose that
+> signing payload. `--ext` can *carry* such a value once you have it, but computing it for the
+> tx the CLI is about to build is tracked as a separate capability (see the issue tracker).
 
 #### Transaction options
 
@@ -2026,6 +2064,27 @@ dot verifiable prove alice --entropy-key candidate --context dotns \
 dot verifiable verify --proof 0x… --context dotns --message 0x… --members 0x…
 # verify exits non-zero if the proof does not validate
 ```
+
+`--members` on `prove`/`verify` accepts the ring in **any** of three forms — pick
+whichever is convenient:
+
+- the SCALE-encoded `Vec<[u8;32]>` blob emitted by `dot verifiable members …`,
+- loose 32-byte member keys concatenated as one hex string (`0x<key1><key2>…`),
+- a comma-separated list of 0x-hex keys (`0x<key1>,0x<key2>`).
+
+A path to a file containing the concatenated or SCALE-encoded form also works
+(the comma-separated form is for typing keys directly on the command line). The
+keys must each be exactly 32 bytes; anything else fails with a message pointing
+back here.
+
+> **Members need not be recognised "persons".** `--entropy-key` selects a
+> personhood derivation mode (omit = lite/unkeyed, `candidate` = full), but a
+> member key is just a Bandersnatch public key — pallets that only check
+> `verify_signature(proof, message, member)` (e.g. permissionless onboarding
+> flows) accept any member. The one hard rule is **consistency**: derive with the
+> same account + `--entropy-key` you will later `prove`/`sign` with, or the member
+> key won't match. The 32-byte `--context` is a namespace defined by *your*
+> use case; `dot verifiable` neither knows nor cares what it means.
 
 `dot verifiable` is deliberately scoped to **raw verifiable crypto** — bytes in,
 bytes out, with no knowledge of Polkadot chains, pallets, or collections (the

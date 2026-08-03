@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { toHex } from "../../core/hash.ts";
 import {
   bandersnatchSign,
+  canonicalizeMembers,
   compactEncode,
   DEFAULT_RING_EXPONENT,
   deriveAlias,
@@ -63,6 +64,34 @@ describe("encodeMembers", () => {
 
   test("rejects non-32-byte members", () => {
     expect(() => encodeMembers([new Uint8Array(31)])).toThrow("32 bytes");
+  });
+});
+
+describe("canonicalizeMembers", () => {
+  const a = new Uint8Array(32).fill(0x11);
+  const b = new Uint8Array(32).fill(0x22);
+
+  test("re-encodes loose concatenated keys (length multiple of 32)", () => {
+    const loose = new Uint8Array(64);
+    loose.set(a, 0);
+    loose.set(b, 32);
+    expect(toHex(canonicalizeMembers(loose))).toBe(toHex(encodeMembers([a, b])));
+  });
+
+  test("re-encodes a single loose key", () => {
+    expect(toHex(canonicalizeMembers(a))).toBe(toHex(encodeMembers([a])));
+  });
+
+  test("passes through an already SCALE-encoded blob unchanged", () => {
+    const enc = encodeMembers([a, b]); // length 65, not a multiple of 32
+    expect(toHex(canonicalizeMembers(enc))).toBe(toHex(enc));
+  });
+
+  test("an encoded Vec is never a multiple of 32, so detection is unambiguous", () => {
+    for (let n = 1; n <= 70; n++) {
+      const members = Array.from({ length: n }, () => new Uint8Array(32).fill(n & 0xff));
+      expect(encodeMembers(members).length % 32).not.toBe(0);
+    }
   });
 });
 
