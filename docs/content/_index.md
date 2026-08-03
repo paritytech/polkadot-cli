@@ -63,20 +63,20 @@ This writes the skill to `~/.agents/skills/dot-cli`, where Codex auto-discovers 
 
 ### Claude Code
 
-Register this repo as a plugin marketplace in Claude Code, then install the skill:
-
-```
-/plugin marketplace add peetzweg/polkadot-cli
-/plugin install dot-cli@polkadot-cli
-```
-
-You can also invoke it directly with `/dot-cli`.
-
-Alternatively, install the binary-bundled copy without the marketplace:
-
 ```
 dot skill install --claude    # -> ~/.claude/skills/dot-cli
 ```
+
+This registers the skill under the short name `dot-cli`, invokable with `/dot-cli`.
+
+Alternatively, register this repo as a plugin marketplace in Claude Code and install the skill from there (registers under the more verbose plugin-scoped name `dot-cli:dot-cli`):
+
+```
+/plugin marketplace add paritytech/polkadot-cli
+/plugin install dot-cli@polkadot-cli
+```
+
+Pick one method — installing both ways leaves Claude Code with two copies of the same skill.
 
 ### Install targets
 

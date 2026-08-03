@@ -83,20 +83,20 @@ This writes the skill to `~/.agents/skills/dot-cli`, where Codex auto-discovers 
 
 ### Claude Code
 
-Register the marketplace and install the skill:
-
-```
-/plugin marketplace add peetzweg/polkadot-cli
-/plugin install dot-cli@polkadot-cli
-```
-
-You can also invoke it directly with `/dot-cli`, and pull updates with `/plugin marketplace update polkadot-cli`.
-
-Alternatively, install the binary-bundled copy without the marketplace:
-
 ```bash
 dot skill install --claude    # -> ~/.claude/skills/dot-cli
 ```
+
+This registers the skill under the short name `dot-cli`, invokable with `/dot-cli`.
+
+Alternatively, install via the plugin marketplace (registers as the more verbose `dot-cli:dot-cli`):
+
+```
+/plugin marketplace add paritytech/polkadot-cli
+/plugin install dot-cli@polkadot-cli
+```
+
+Pick one method — installing both ways leaves Claude Code with two copies of the same skill. Marketplace installs update with `/plugin marketplace update polkadot-cli`.
 
 After upgrading `dot` (`npm install -g polkadot-cli@latest`), re-run `dot skill install --codex`/`--claude` to refresh the installed skill. Run `dot skill path` to see where each agent's copy lives. Installed copies carry the CLI version in their frontmatter (`version:`), so an agent can spot a stale skill by comparing it against `dot --version`.
 

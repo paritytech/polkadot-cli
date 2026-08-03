@@ -171,13 +171,15 @@ export async function handleSkillPath(
   home: string = homedir(),
   cwd: string = process.cwd(),
 ): Promise<void> {
-  // With no explicit target, show where each agent would install globally.
+  // With no explicit target, show where each agent would install; `--local`
+  // alone switches that default from the home directory to the current repo.
+  const explicit = explicitTargets(opts, home, cwd);
   const targets =
-    explicitTargets(opts, home, cwd).length > 0
-      ? explicitTargets(opts, home, cwd)
+    explicit.length > 0
+      ? explicit
       : [
-          { label: "codex", dir: agentSkillDir("codex", false, home, cwd) },
-          { label: "claude", dir: agentSkillDir("claude", false, home, cwd) },
+          { label: "codex", dir: agentSkillDir("codex", !!opts.local, home, cwd) },
+          { label: "claude", dir: agentSkillDir("claude", !!opts.local, home, cwd) },
         ];
 
   if (isJsonOutput(opts)) {

@@ -203,6 +203,13 @@ describe("handleSkillPath", () => {
     expect(out).toContain(join("/home/u", ".claude", "skills", SKILL_NAME));
   });
 
+  test("--local alone reports both repo-local dirs instead of home", async () => {
+    const out = await capture(() => handleSkillPath({ local: true }, "/home/u", "/repo"));
+    expect(out).toContain(join("/repo", ".agents", "skills", SKILL_NAME));
+    expect(out).toContain(join("/repo", ".claude", "skills", SKILL_NAME));
+    expect(out).not.toContain("/home/u");
+  });
+
   test("an explicit target narrows the output to that agent", async () => {
     const out = await capture(() => handleSkillPath({ codex: true }, "/home/u", "/repo"));
     expect(out).toContain(join("/home/u", ".agents", "skills", SKILL_NAME));
