@@ -9,6 +9,7 @@
 - [Big Number Arithmetic](#big-number-arithmetic)
 - [FixedU128 Rate Calculation](#fixedu128-rate-calculation)
 - [Checking Runtime Capabilities](#checking-runtime-capabilities)
+- [Contract Calls as an Ethereum Identity](#contract-calls-as-an-ethereum-identity)
 - [Common Gotchas](#common-gotchas)
 
 ---
@@ -349,6 +350,39 @@ dot polkadot-asset-hub.apis.AssetConversionApi.get_reserves "$NATIVE" "$ASSET" -
 #   "99382392973"
 # ]
 ```
+
+## Contract Calls as an Ethereum Identity
+
+Revive contracts often gate admin functions on eth-key owners/roles. The read side is a free `ReviveApi.call` dry-run from any account; the write side needs an ethereum-scheme account (`--scheme ethereum`). Idempotent check-then-act for a whitelist entry:
+
+```bash
+CTRL=0xf209507ab5e6Cf1245aeC020E94c7E213020899B   # DotnsRegistrarController (previewnet)
+WHO=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+CHAIN=preview-asset-hub
+
+# READ — encode isWhiteListed(address) and dry-run via the runtime API (no signer).
+# Selector = first 4 bytes of keccak256 of the bare signature; args are ABI-encoded.
+SEL=$(dot hash keccak256 "isWhiteListed(address)" | cut -c1-10)
+CALLDATA="${SEL}000000000000000000000000${WHO#0x}"
+ORIGIN=$(dot account inspect alice --json | jq -r .ss58)
+RESULT=$(dot $CHAIN.apis.ReviveApi.call "$ORIGIN" "$CTRL" 0 null null "$CALLDATA" --json \
+  | jq -r .result.value.data)
+
+if [ "${RESULT: -1}" != "1" ]; then
+  # WRITE — executes as the eth account's address (msg.sender), which is what
+  # the contract's onlyOwner/role check requires. Calldata is built from the
+  # signature cast-style; gas/nonce/chain-id are handled automatically.
+  dot $CHAIN.tx.Revive.call "$CTRL" 'whiteListAddress(address,bool)' "$WHO" true \
+    --from dotns-admin --wait best
+fi
+```
+
+Notes:
+
+- Fund the eth account's **fallback SS58** (`dot account inspect <name> --json | jq -r .ss58`) — fees come from there.
+- `--dry-run` on the write prints gas, storage deposit, max fee, and the decoded revert if the contract would reject the call — nothing is submitted.
+- `--value <wei>` sends value with the call (18 EVM decimals; on a 10-decimals chain the wei→planck ratio is 10^8).
+- The nonce for rapid-fire sequencing is the fallback account's `System.Account` nonce (`--nonce` overrides).
 
 ## Common Gotchas
 

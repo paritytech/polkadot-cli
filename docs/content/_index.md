@@ -23,6 +23,7 @@ A command-line tool for interacting with Polkadot-ecosystem chains. Manage chain
 - ✅ File-based commands — run any command from a YAML/JSON file with variable substitution
 - ✅ Sovereign accounts — store a parachain (child / sibling) or pallet (Treasury, Bounties, NominationPools, …) sovereign as a named watch-only account in one command
 - ✅ Unsigned/authorized transactions — submit governance-authorized calls without a signer (`--unsigned`)
+- ✅ Ethereum accounts & contract calls — `--scheme ethereum` stores a secp256k1 key; `dot <chain>.tx.Revive.call` builds calldata cast-style from an ABI signature and submits an EIP-1559 tx via pallet-revive's `eth_transact`, no eth-rpc sidecar
 - ✅ Non-native fee payment — pay tx fees in any asset the chain accepts via `--asset` (asset-hub-style chains)
 - ✅ Message signing — sign arbitrary bytes with account keypairs for use as `MultiSignature` arguments
 - ✅ Bandersnatch member keys — derive Ring VRF member keys from mnemonics for on-chain member sets
@@ -516,6 +517,31 @@ Use the account like any other:
 ```
 MY_SECRET="word1 word2 ..." dot polkadot.tx.System.remark 0xdead --from ci-signer
 ```
+
+### Ethereum (secp256k1) accounts
+
+Contracts on pallet-revive chains often gate admin operations on an **Ethereum-key identity**: the `owner()` or role holders are addresses derived from secp256k1 keys, which a substrate signer's mapped H160 can never equal. `--scheme ethereum` stores such a key so `dot` can act as that identity — see [Ethereum transactions](#ethereum-transactions-pallet-revive-eth_transact) for how these accounts transact:
+
+```
+# Import an existing key (0x + 64 hex chars)
+dot account add dotns-admin --scheme ethereum --secret 0x59c6…690d
+# Account Imported
+#
+#   Name:    dotns-admin
+#   Scheme:  ethereum (secp256k1)
+#   Address: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+#   SS58:    5EcLp2gKW3p2fTL3h4mTeqr9yV4eNcbQCkygCgDqwd3NtvAR (fallback account)
+
+# Generate a fresh key
+dot account create hot-wallet --scheme ethereum
+
+# Keep the key off disk entirely
+dot account add ci-admin --scheme ethereum --env DOTNS_ADMIN_KEY
+```
+
+The account's identity is its EIP-55 H160; the printed SS58 is the deterministic revive **fallback account** (`H160 ‖ 0xEE×12`) — fund that address to pay the account's transaction fees, and read its balance/nonce through it like any other account. `dot account inspect <name> --show-secret` reveals the secp256k1 private key.
+
+Ethereum accounts cannot sign substrate extrinsics (that is the point — their transactions execute as the eth address itself), so `--path` is rejected and `dot sign`/ordinary `--from` usage errors with guidance.
 
 ### Derive a child account
 
@@ -1884,6 +1910,7 @@ Override low-level transaction parameters. Useful for rapid-fire submission (cus
 | `--tip <amount>` | non-negative integer (planck) | Priority tip for the transaction pool |
 | `--mortality <spec>` | `immortal` or period (min 4) | Transaction mortality window |
 | `--at <block>` | 0x-prefixed block hash, `"best"`, or `"finalized"` | Block to read/validate against (defaults to finalized). Also honored on `query.*` and `apis.*` for historical reads; tx submission rejects `"best"`. |
+| `--value <wei>` | non-negative integer (wei, 18 EVM decimals) | Value transferred with an [ethereum contract call](#ethereum-transactions-pallet-revive-eth_transact) — only valid with an ethereum-scheme `--from` |
 
 ```
 # Fire-and-forget: submit two txs in rapid succession with manual nonces
@@ -2002,6 +2029,39 @@ tx:
 dot ./create-people-collection.yaml
 dot ./create-people-collection.yaml --dry-run
 ```
+
+### Ethereum transactions (pallet-revive `eth_transact`)
+
+When `--from` names an [ethereum-scheme account](#ethereum-secp256k1-accounts), `dot <chain>.tx.Revive.call` changes meaning: instead of a substrate extrinsic, the CLI prices the call via a `ReviveApi.eth_transact` dry-run, signs an **EIP-1559 transaction** with the account's secp256k1 key, and submits it wrapped in the unsigned `Revive.eth_transact` extrinsic — over the same WebSocket connection, no eth-rpc sidecar. The call executes on-chain with the eth address as `msg.sender`, which is what contract-side `owner()`/role checks require.
+
+```
+# Cast-style: calldata built from a human ABI signature
+dot preview-asset-hub.tx.Revive.call 0xf209…899B 'whiteListAddress(address,bool)' 0xAbC…123 true --from dotns-admin
+
+# Raw calldata
+dot preview-asset-hub.tx.Revive.call 0x03e9…6eB1 0x42cbb15c --from dotns-admin
+
+# Bare value transfer (value is in wei — 18 EVM decimals)
+dot preview-asset-hub.tx.Revive.call 0x7099…79C8 --value 1000000000000000000 --from dotns-admin
+
+# Dry-run: gas, storage deposit, max fee, and decoded revert/return data
+dot preview-asset-hub.tx.Revive.call 0xf209…899B 'available(string)' myname123 --from dotns-admin --dry-run
+#   Chain:  preview-asset-hub (eth chain id 420420417)
+#   From:   dotns-admin (0x3243631Cb1EADF0FbA31BFA8e739585c6953ba73)
+#   To:     0xf209507ab5e6Cf1245aeC020E94c7E213020899B
+#   Method: available(string)
+#   Data:   0xaeb8ce9b0000…
+#   Nonce:  2
+#   Gas:    10933 @ 1000000000000 wei
+#   Max fee: 10933000000000000 wei
+#   Return: 0x0000…0001
+```
+
+Arguments are `<dest-h160>` followed by either raw `0x` calldata or a `'signature(types)'` with its arguments (`uint*`/`int*` as integers, `bool` as `true`/`false`, `address`/`bytes*` as hex, `string` verbatim, arrays/tuples as JSON). Chain id, nonce, and gas are read from the chain; `--nonce` overrides the nonce. `--value` is in wei.
+
+A failed dry-run prints the decoded Solidity revert (`Error(string)`/`Panic(uint256)`) or the raw revert data. `--tip`, `--mortality`, `--asset`, and `--ext` do not apply and are rejected; targets other than `Revive.call` error with guidance, since a secp256k1 key cannot sign substrate extrinsics.
+
+The account's fees are withdrawn from its fallback account (fund it first — see [Ethereum accounts](#ethereum-secp256k1-accounts)). `DOT_DRY_RUN=1` and `--dry-run`/`--no-dry-run` behave exactly as for substrate transactions.
 
 ## File-Based Commands
 

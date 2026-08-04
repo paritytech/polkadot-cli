@@ -454,6 +454,9 @@ dot account add ci --env SECRET_VAR
 dot account add seeded --secret 0x1111111111111111111111111111111111111111111111111111111111111111
 dot account add raw-key --secret 0x<128-hex-char expanded secret>
 
+# Ethereum (secp256k1) account — see "Ethereum Accounts + Contract Calls" below
+dot account add dotns-admin --scheme ethereum --secret 0x<64-hex-privkey>
+
 # Generate a new account
 dot account create new-key
 # Output:
@@ -518,6 +521,30 @@ dot account add raw-dave --secret "$SECRET"   # same address as dave, can sign
 ```
 
 Mapping rule (offline, matches current `polkadot-sdk` master): if the last 12 bytes of the AccountId32 are `0xEE` the H160 is the first 20 bytes (eth-derived); otherwise `keccak256(accountId32)` and take the last 20. The reverse direction always returns the `H160 || 0xEE * 12` fallback — the full mapping after `pallet_revive.map_account` lives in on-chain `AddressSuffix` storage and isn't recoverable offline. Older `stable2412` runtimes used plain `accountId32[..20]` truncation; if you target one, compute manually.
+
+### Ethereum (secp256k1) Accounts + Contract Calls via `eth_transact`
+
+`--scheme ethereum` stores a secp256k1 key so `dot` can act as an Ethereum-key identity on pallet-revive chains — needed when a contract's `owner()`/role holders are eth addresses that a substrate signer's mapped H160 can never equal:
+
+```bash
+dot account add dotns-admin --scheme ethereum --secret 0x<64-hex-privkey>
+dot account create hot-wallet --scheme ethereum       # generates + prints the key
+dot account add ci-admin --scheme ethereum --env ADMIN_KEY
+# Identity = EIP-55 H160; the printed SS58 is the fallback account (H160‖0xEE×12).
+# Fund THAT address for fees; read nonce/balance through it like any account.
+```
+
+With an ethereum `--from`, `tx.Revive.call` takes eth-style args and submits an EIP-1559 tx wrapped in unsigned `Revive.eth_transact` (no eth-rpc sidecar; executes with the eth address as `msg.sender`):
+
+```bash
+# Cast-style ABI signature, raw calldata, or bare value transfer (wei)
+dot preview-asset-hub.tx.Revive.call 0xf209…899B 'whiteListAddress(address,bool)' 0xAbC… true --from dotns-admin
+dot preview-asset-hub.tx.Revive.call 0x03e9…6eB1 0x42cbb15c --from dotns-admin
+dot preview-asset-hub.tx.Revive.call 0x7099…79C8 --value 1000000000000000000 --from dotns-admin
+# --dry-run prints gas, storage deposit, max fee, decoded revert/return data
+```
+
+Arg conventions for `'sig(types)'` args: ints as integers, `bool` as true/false, `address`/`bytes*` as 0x-hex, `string` verbatim, arrays/tuples as JSON. `--tip`/`--mortality`/`--asset`/`--ext` are rejected; ethereum accounts cannot sign substrate extrinsics (any other `tx.<Pallet>.<call>` target errors with guidance).
 
 ### Sovereign Accounts (Parachain & Pallet)
 
@@ -707,6 +734,8 @@ dot verifiable verify --proof 0x<proof> --context dotns \
 | `--dump` | query | Dump all entries of a storage map |
 | `--ext <json>` | tx | Custom signed extension values |
 | `--at <block>` | tx, query, apis | Block hash, `"best"`, or `"finalized"` to read/validate against. Defaults to finalized. Tx submission rejects `"best"`. |
+| `--scheme <s>` | account add/create | `sr25519` (default) or `ethereum` (secp256k1 key) |
+| `--value <wei>` | tx (ethereum `--from` only) | Value sent with a `Revive.call` contract call, in wei (18 EVM decimals) |
 
 ## Common Errors
 
@@ -715,6 +744,8 @@ dot verifiable verify --proof 0x<proof> --context dotns \
 - **`undefined` piped into `jq`** — the literal string `undefined` is not JSON. Guard with `[ "$X" == "undefined" ]` before piping.
 - **Decode errors after a runtime upgrade** — metadata cache is keyed by chain name; register a fresh `dot chain add` alias for the upgraded chain rather than reusing the old one.
 - **Wasm trap / "validate_transaction" panic on submit** — almost always stale local metadata. The CLI now prints a `⚠ Local metadata for "<chain>" is out of date … Run: dot chain update <chain>` line right after such errors. Run that command and retry. The check uses both `specVersion` and the runtime code hash, so it also catches local-node restarts where the wasm changed but `specVersion` was kept the same. Set `DOT_TRUST_CACHED_METADATA=1` to suppress the check entirely.
+- **`cannot sign substrate extrinsics` from an ethereum account** — an `--scheme ethereum` account only submits contract calls via `dot <chain>.tx.Revive.call … --from <name>` on pallet-revive chains. For ordinary extrinsics use an sr25519 account. If the eth tx fails with a fee/balance error, fund the account's **fallback SS58** (shown by `dot account inspect <name>`), not the H160.
+- **`Dry-run failed: Contract reverted …`** — the contract rejected the call (decoded `Error(string)`/`Panic` when possible; custom errors show raw data). Nothing was submitted; fix the args/permissions and retry.
 
 ## Scripting Patterns
 
