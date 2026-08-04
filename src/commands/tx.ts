@@ -4,9 +4,10 @@ import { getViewBuilder } from "@polkadot-api/view-builder";
 import type { TxBestBlocksState, TxBroadcasted, TxEvent, TxFinalized } from "polkadot-api";
 import { Binary } from "polkadot-api";
 import { stringify as stringifyYaml } from "yaml";
+import { isEthereumAccount } from "../config/accounts-types.ts";
 import { loadConfig, resolveChain } from "../config/store.ts";
 import { primaryRpc } from "../config/types.ts";
-import { resolveAccountSigner, toSs58 } from "../core/accounts.ts";
+import { findStoredAccount, resolveAccountSigner, toSs58 } from "../core/accounts.ts";
 import { type ClientHandle, createChainClient } from "../core/client.ts";
 import { papiLink, pjsAppsLink } from "../core/explorers.ts";
 import type { Lookup, MetadataBundle } from "../core/metadata.ts";
@@ -46,6 +47,7 @@ import { CliError, formatRuntimeError } from "../utils/errors.ts";
 import { suggestMessage } from "../utils/fuzzy-match.ts";
 import { parseValue } from "../utils/parse-value.ts";
 import { loadMeta, resolvePallet, showItemHelp } from "./focused-inspect.ts";
+import { handleEthereumTx } from "./tx-eth.ts";
 
 export type WaitLevel = "broadcast" | "best-block" | "finalized";
 
@@ -166,6 +168,8 @@ export async function handleTx(
     tip?: string;
     mortality?: string;
     at?: string;
+    /** Value in wei for ethereum-signed contract calls (Revive.eth_transact) */
+    value?: string;
     /** Pre-parsed args from a file (skip CLI string parsing, still normalize) */
     parsedArgs?: unknown;
   },
@@ -301,6 +305,17 @@ export async function handleTx(
   const { name: chainName, chain: chainConfig } = resolveChain(config, effectiveChain);
 
   const decodeOnly = opts.encode || opts.toYaml || opts.toJson;
+
+  // Ethereum-scheme signer: the account can't sign substrate extrinsics — its
+  // contract call is priced, signed as an EIP-1559 tx, and submitted through
+  // the unsigned Revive.eth_transact extrinsic instead.
+  if (!decodeOnly && !opts.unsigned && opts.from) {
+    const stored = await findStoredAccount(opts.from);
+    if (stored && isEthereumAccount(stored)) {
+      return handleEthereumTx(target, args, stored.name, chainName, chainConfig, opts);
+    }
+  }
+
   const signer = decodeOnly || opts.unsigned ? undefined : await resolveAccountSigner(opts.from!);
 
   let clientHandle: ClientHandle | undefined;
@@ -1884,4 +1899,6 @@ export {
   sanitizeForSerialization,
   typeHint,
   unsignedDefaultForType,
+  watchTransaction,
+  watchTransactionJson,
 };
