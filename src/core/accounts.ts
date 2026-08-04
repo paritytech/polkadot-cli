@@ -14,9 +14,10 @@ import type { PolkadotSigner } from "polkadot-api/signer";
 import { getPolkadotSigner } from "polkadot-api/signer";
 import { findAccount, loadAccounts } from "../config/accounts-store.ts";
 import type { AccountsFile } from "../config/accounts-types.ts";
-import { type EnvSecret, isEnvSecret } from "../config/accounts-types.ts";
+import { type EnvSecret, isEnvSecret, isEthereumAccount } from "../config/accounts-types.ts";
 import { describeConfigDir } from "../config/store.ts";
 import { findClosest } from "../utils/fuzzy-match.ts";
+import { isEthereumPrivateKey } from "./ethereum.ts";
 
 export const DEV_NAMES = ["alice", "bob", "charlie", "dave", "eve", "ferdie"] as const;
 
@@ -328,7 +329,44 @@ export async function resolveAccountKeypair(
     );
   }
 
+  if (isEthereumAccount(account)) {
+    throw new Error(
+      `Account "${name}" is an Ethereum (secp256k1) account. It cannot sign substrate extrinsics — it acts through Revive.eth_transact on chains with pallet-revive (e.g. dot <chain>.tx.Revive.call … --from ${name}).`,
+    );
+  }
+
   return keypairFromSecret(resolveSecret(account.secret), account.derivationPath);
+}
+
+// Resolve the raw secp256k1 private key of a stored ethereum-scheme account.
+export async function resolveEthereumPrivateKey(name: string): Promise<string> {
+  const accountsFile = await loadAccounts();
+  const account = findAccount(accountsFile, name);
+  if (!account) {
+    throw unknownAccountError(name, accountsFile);
+  }
+  if (!isEthereumAccount(account)) {
+    throw new Error(`Account "${name}" is not an Ethereum account.`);
+  }
+  if (account.secret === undefined) {
+    throw new Error(
+      `Account "${name}" is watch-only (no secret). Cannot sign. Import with --secret or --env.`,
+    );
+  }
+  const secret = resolveSecret(account.secret);
+  if (!isEthereumPrivateKey(secret)) {
+    throw new Error(
+      `Account "${name}" does not hold a valid Ethereum private key (expected 0x + 64 hex chars).`,
+    );
+  }
+  return secret;
+}
+
+// Load the stored account record for a name, or null for dev/unknown names.
+// Used to branch on the account's scheme before committing to a signer type.
+export async function findStoredAccount(name: string) {
+  const accountsFile = await loadAccounts();
+  return findAccount(accountsFile, name);
 }
 
 export async function resolveAccountSigner(name: string): Promise<PolkadotSigner> {
@@ -351,6 +389,12 @@ export async function resolveAccountExpandedSecret(name: string): Promise<Uint8A
   if (account.secret === undefined) {
     throw new Error(
       `Account "${name}" is watch-only (no secret). Cannot derive private key. Import with --secret or --env.`,
+    );
+  }
+
+  if (isEthereumAccount(account)) {
+    throw new Error(
+      `Account "${name}" is an Ethereum (secp256k1) account and has no sr25519 key. Use \`dot account inspect ${name} --show-secret\` to reveal its private key.`,
     );
   }
 

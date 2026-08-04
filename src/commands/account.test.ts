@@ -2132,3 +2132,231 @@ describe("dot account", { timeout: 15_000 }, () => {
     expect(b.ss58).toBe("13UVJyLnbVp9RBZYFwFGyDvVd1y27Tt8tkntv6Q7JVPhFsTB");
   });
 });
+
+// Ethereum (secp256k1) accounts — scheme "ethereum" (#284). The stored
+// publicKey is the fallback AccountId32 (H160 ‖ 0xEE×12); the H160 is the
+// account's display identity.
+// @ts-expect-error Bun supports describe(label, options, fn) at runtime
+describe("dot account --scheme ethereum", { timeout: 15_000 }, () => {
+  // Well-known anvil/hardhat dev key #1.
+  const ETH_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+  const ETH_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+  const ETH_FALLBACK_PUBKEY = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8eeeeeeeeeeeeeeeeeeeeeeee";
+
+  const ETH_ACCOUNT: StoredAccount = {
+    name: "eth-admin",
+    secret: ETH_KEY,
+    publicKey: ETH_FALLBACK_PUBKEY,
+    derivationPath: "",
+    scheme: "ethereum",
+  };
+
+  test("add --scheme ethereum --secret imports and prints EIP-55 H160 + fallback SS58", async () => {
+    const { stdout, exitCode } = await runCli([
+      "account",
+      "add",
+      "eth-admin",
+      "--scheme",
+      "ethereum",
+      "--secret",
+      ETH_KEY,
+    ]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("ethereum (secp256k1)");
+    expect(stdout).toContain(ETH_ADDRESS);
+    expect(stdout).toContain("fallback account");
+  });
+
+  test("add --scheme ethereum --json returns scheme, address, and ss58", async () => {
+    const { stdout, exitCode } = await runCli([
+      "account",
+      "add",
+      "eth-admin",
+      "--scheme",
+      "ethereum",
+      "--secret",
+      ETH_KEY,
+      "--json",
+    ]);
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    expect(result.scheme).toBe("ethereum");
+    expect(result.address).toBe(ETH_ADDRESS);
+    expect(typeof result.ss58).toBe("string");
+  });
+
+  test("add --scheme ethereum rejects a non-key secret", async () => {
+    for (const bad of [TEST_MNEMONIC, "0x1234", `0x${"11".repeat(64)}`]) {
+      const { stderr, exitCode } = await runCli([
+        "account",
+        "add",
+        "eth-bad",
+        "--scheme",
+        "ethereum",
+        "--secret",
+        bad,
+      ]);
+      expect(exitCode).not.toBe(0);
+      expect(stderr).toContain("Invalid Ethereum private key");
+    }
+  });
+
+  test("add --scheme ethereum rejects --path", async () => {
+    const { stderr, exitCode } = await runCli([
+      "account",
+      "add",
+      "eth-pathy",
+      "--scheme",
+      "ethereum",
+      "--secret",
+      ETH_KEY,
+      "--path",
+      "//nope",
+    ]);
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain("Derivation paths are not supported for ethereum accounts");
+  });
+
+  test("add --scheme ethereum without --secret/--env errors", async () => {
+    const { stderr, exitCode } = await runCli([
+      "account",
+      "add",
+      "eth-naked",
+      "--scheme",
+      "ethereum",
+    ]);
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain("--scheme ethereum requires --secret");
+  });
+
+  test("unknown --scheme value errors", async () => {
+    const { stderr, exitCode } = await runCli([
+      "account",
+      "add",
+      "eth-x",
+      "--scheme",
+      "ed25519",
+      "--secret",
+      ETH_KEY,
+    ]);
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain('Unknown scheme "ed25519"');
+  });
+
+  test("create --scheme ethereum generates a key and prints it", async () => {
+    const { stdout, exitCode } = await runCli([
+      "account",
+      "create",
+      "eth-fresh",
+      "--scheme",
+      "ethereum",
+      "--json",
+    ]);
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    expect(result.scheme).toBe("ethereum");
+    expect(result.privateKey).toMatch(/^0x[0-9a-f]{64}$/i);
+    expect(result.address).toMatch(/^0x[0-9a-fA-F]{40}$/);
+  });
+
+  test("create --scheme ethereum rejects --path", async () => {
+    const { stderr, exitCode } = await runCli([
+      "account",
+      "create",
+      "eth-fresh",
+      "--scheme",
+      "ethereum",
+      "--path",
+      "//nope",
+    ]);
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain("Derivation paths are not supported");
+  });
+
+  test("env-backed ethereum account derives from the env var", async () => {
+    const { stdout, exitCode } = await runCli(
+      ["account", "add", "eth-env", "--scheme", "ethereum", "--env", "ETH_TEST_KEY", "--json"],
+      { env: { ETH_TEST_KEY: ETH_KEY } },
+    );
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    expect(result.address).toBe(ETH_ADDRESS);
+    expect(result.env).toBe("ETH_TEST_KEY");
+  });
+
+  test("env-backed ethereum account with unset var defers address", async () => {
+    const { stdout, exitCode } = await runCli([
+      "account",
+      "add",
+      "eth-env2",
+      "--scheme",
+      "ethereum",
+      "--env",
+      "ETH_UNSET_VAR",
+    ]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Address will resolve when $ETH_UNSET_VAR is set");
+  });
+
+  test("env-backed ethereum account with an invalid env value errors", async () => {
+    const { stderr, exitCode } = await runCli(
+      ["account", "add", "eth-env3", "--scheme", "ethereum", "--env", "ETH_BAD_KEY"],
+      { env: { ETH_BAD_KEY: "not-a-key" } },
+    );
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain("does not hold a valid Ethereum private key");
+  });
+
+  test("list shows H160 as address with scheme and ss58 attributes", async () => {
+    const { stdout, exitCode } = await runCli(["account", "list"], {
+      accounts: [ETH_ACCOUNT],
+    });
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain(ETH_ADDRESS);
+    expect(stdout).toContain("scheme: ethereum");
+    expect(stdout).toContain("ss58:");
+  });
+
+  test("list --json includes scheme and ss58", async () => {
+    const { stdout, exitCode } = await runCli(["account", "list", "--json"], {
+      accounts: [ETH_ACCOUNT],
+    });
+    expect(exitCode).toBe(0);
+    const { stored } = JSON.parse(stdout);
+    expect(stored[0].scheme).toBe("ethereum");
+    expect(stored[0].address).toBe(ETH_ADDRESS);
+    expect(typeof stored[0].ss58).toBe("string");
+  });
+
+  test("inspect resolves the account with kind signer (ethereum)", async () => {
+    const { stdout, exitCode } = await runCli(["account", "inspect", "eth-admin", "--json"], {
+      accounts: [ETH_ACCOUNT],
+    });
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    expect(result.kind).toBe("signer (ethereum)");
+    expect(result.scheme).toBe("ethereum");
+    expect(result.h160).toBe(ETH_ADDRESS);
+    expect(result.publicKey).toBe(ETH_FALLBACK_PUBKEY);
+  });
+
+  test("inspect --show-secret reveals the secp256k1 key, not an sr25519 expansion", async () => {
+    const { stdout, exitCode } = await runCli(
+      ["account", "inspect", "eth-admin", "--show-secret", "--json"],
+      { accounts: [ETH_ACCOUNT] },
+    );
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    expect(result.privateKey).toBe(ETH_KEY);
+    expect(result.mnemonic).toBeUndefined();
+    expect(result.seed).toBeUndefined();
+  });
+
+  test("sign refuses an ethereum account with a pointed error", async () => {
+    const { stderr, exitCode } = await runCli(["sign", "hello", "--from", "eth-admin"], {
+      accounts: [ETH_ACCOUNT],
+    });
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain("cannot sign substrate extrinsics");
+  });
+});
