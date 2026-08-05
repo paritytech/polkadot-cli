@@ -30,7 +30,7 @@ Ships with Polkadot and all system parachains preconfigured with multiple fallba
 - ✅ Sovereign accounts — store a parachain (child / sibling) or pallet (Treasury, Bounties, NominationPools, …) sovereign as a named watch-only account in one command
 - ✅ Message signing — sign arbitrary bytes with account keypairs for use as `MultiSignature` arguments
 - ✅ Unsigned/authorized transactions — submit governance-authorized calls without a signer (`--unsigned`)
-- ✅ Ethereum accounts & contract calls — `--scheme ethereum` stores a secp256k1 key; `dot <chain>.tx.Revive.call` builds calldata cast-style from an ABI signature and submits an EIP-1559 tx via pallet-revive's `eth_transact`, no eth-rpc sidecar
+- ✅ Ethereum identities & contract calls — every mnemonic account has a derived MetaMask-compatible identity (`--from alice-eth` = Alith), or store a raw key with `--scheme ethereum`; `dot <chain>.tx.Revive.call` builds calldata cast-style from an ABI signature and submits an EIP-1559 tx via pallet-revive's `eth_transact`, no eth-rpc sidecar
 - ✅ Non-native fee payment — pay tx fees in any asset the chain accepts via `--asset` (asset-hub-style chains)
 - ✅ Bandersnatch member keys — derive Ring VRF member keys from mnemonics for on-chain member sets
 - ✅ Export/import — portable chain and account configuration for backup, sharing, and CI bootstrapping
@@ -636,29 +636,37 @@ dot account add server-signer --env PROXY_PRIVATE_KEY
 
 A raw private key cannot be HD-derived, so `--path` is rejected for this format. Imported expanded-secret accounts sign exactly like mnemonic-backed ones.
 
-#### Ethereum (secp256k1) accounts
+#### Ethereum identities (secp256k1)
 
-Contracts on pallet-revive chains often gate admin operations on an **Ethereum-key identity**: the `owner()` or role holders are addresses derived from secp256k1 keys, which a substrate signer's mapped H160 can never equal. `--scheme ethereum` stores such a key so `dot` can act as that identity — see [Ethereum transactions](#ethereum-transactions-pallet-revive-eth_transact) for how these accounts transact.
+Contracts on pallet-revive chains often gate admin operations on an **Ethereum-key identity**: the `owner()` or role holders are addresses derived from secp256k1 keys, which a substrate signer's mapped H160 can never equal (that H160 is `keccak(AccountId32)[12..]` — a hash, not a key, so no signer can ever be extracted from it). `dot` gives you an ethereum identity two ways.
+
+**Every mnemonic-backed account already has one — select it with the `-eth` suffix.** The same phrase derives the MetaMask-compatible BIP44 key (`m/44'/60'/0'/0/0`), so `--from <name>-eth` signs as that address anywhere an ethereum signer is accepted. Dev accounts use their position as the BIP44 index, which reproduces the well-known revive/Moonbeam dev accounts: `alice-eth` is **Alith**, `bob-eth` is **Baltathar**, and so on.
 
 ```bash
-# Import an existing key (0x + 64 hex chars)
-dot account add dotns-admin --scheme ethereum --secret 0x59c6…690d
-# Output:
-# Account Imported
-#
-#   Name:    dotns-admin
-#   Scheme:  ethereum (secp256k1)
-#   Address: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
-#   SS58:    5EcLp2gKW3p2fTL3h4mTeqr9yV4eNcbQCkygCgDqwd3NtvAR (fallback account)
+dot account inspect alice
+#   SS58:        5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY
+#   H160:        0x9621DDe636dE098B43Efb0fA9b61fAcFE328F99D          ← mapped (substrate-signed calls act as this)
+#   Ethereum:    0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac (--from alice-eth, m/44'/60'/0'/0/0)
 
-# Generate a fresh key
-dot account create hot-wallet --scheme ethereum
-
-# Keep the key off disk entirely
-dot account add ci-admin --scheme ethereum --env DOTNS_ADMIN_KEY
+dot account inspect alice-eth
+#   Kind:        signer (ethereum, derived from alice)
+#   H160:        0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac
+#   SS58:        5HYRCKHYJN9z5xUtfFkyMj4JUhsAwWyvuU8vKB1FcnYTf9ZQ   ← fallback account: fund this for fees
 ```
 
-The account's identity is its EIP-55 H160; the printed SS58 is the deterministic revive **fallback account** (`H160 ‖ 0xEE×12`) — fund that address to pay the account's transaction fees, and read its balance/nonce through it like any other account. `dot account inspect <name> --show-secret` reveals the secp256k1 private key. Ethereum accounts cannot sign substrate extrinsics (that is the point — their transactions execute as the eth address itself), so `--path` is rejected and `dot sign`/ordinary `--from` usage errors with guidance.
+One phrase, **two on-chain identities** — that's the thing to internalize. A substrate-signed contract call from `alice` executes as her *mapped* H160; an eth-signed call from `alice-eth` executes as the BIP44 address. Contracts see different `msg.sender` depending on which one signs. A real stored account named `<name>-eth` always wins over the derived form, and non-mnemonic secrets (hex seeds, raw sr25519 keys, watch-only) have nothing to derive from — the error tells you to import a key directly instead.
+
+**Or store a dedicated key with `--scheme ethereum`** — for keys that already exist elsewhere (MetaMask exports, deployer keys):
+
+```bash
+dot account add dotns-admin --scheme ethereum --secret 0x59c6…690d   # import (0x + 64 hex chars)
+dot account create hot-wallet --scheme ethereum                      # generate
+dot account add ci-admin --scheme ethereum --env DOTNS_ADMIN_KEY     # keep off disk
+```
+
+Either way the identity is its EIP-55 H160; the printed SS58 is the deterministic revive **fallback account** (`H160 ‖ 0xEE×12`) — fund that address to pay fees, and read balance/nonce through it like any other account. `--show-secret` reveals the secp256k1 key. Ethereum identities cannot sign substrate extrinsics, so `--path` is rejected and `dot sign`/ordinary `--from` usage errors with guidance. See [Ethereum transactions](#ethereum-transactions-pallet-revive-eth_transact) for how they transact.
+
+**Relation to `Revive.map_account`:** mapping is about *receiving*, not signing. Without an `OriginalAccount` entry, value sent to a substrate account's mapped H160 lands in the synthetic fallback account; `dot <chain>.tx.Revive.map_account --from <name>` registers the mapping so it reaches the real account (chains with the `Revive.AutoMap` constant set to `true` — previewnet asset-hub, for one — do this automatically on account creation). Ethereum identities never need it: their fallback account *is* their account.
 
 #### Export/import accounts
 
@@ -1624,12 +1632,15 @@ tx:
 
 #### Ethereum transactions (pallet-revive `eth_transact`)
 
-When `--from` names an [ethereum-scheme account](#ethereum-secp256k1-accounts), `dot <chain>.tx.Revive.call` changes meaning: instead of a substrate extrinsic, the CLI prices the call via a `ReviveApi.eth_transact` dry-run, signs an **EIP-1559 transaction** with the account's secp256k1 key, and submits it wrapped in the unsigned `Revive.eth_transact` extrinsic — over the same WebSocket connection, no eth-rpc sidecar. The call executes on-chain with the eth address as `msg.sender`, which is what contract-side `owner()`/role checks require.
+When `--from` names an [ethereum identity](#ethereum-identities-secp256k1) — a `--scheme ethereum` account or the `<name>-eth` form derived from any mnemonic-backed account — `dot <chain>.tx.Revive.call` changes meaning: instead of a substrate extrinsic, the CLI prices the call via a `ReviveApi.eth_transact` dry-run, signs an **EIP-1559 transaction** with the identity's secp256k1 key, and submits it wrapped in the unsigned `Revive.eth_transact` extrinsic — over the same WebSocket connection, no eth-rpc sidecar. The call executes on-chain with the eth address as `msg.sender`, which is what contract-side `owner()`/role checks require.
 
 ```bash
 # Cast-style: calldata built from a human ABI signature
 dot preview-asset-hub.tx.Revive.call 0xf209…899B 'whiteListAddress(address,bool)' 0xAbC…123 true \
   --from dotns-admin
+
+# Same, signing with the ethereum identity derived from a mnemonic account (alice-eth = Alith)
+dot preview-asset-hub.tx.Revive.call 0x03e9…6eB1 'getBlockNumber()' --from alice-eth
 
 # Raw calldata
 dot preview-asset-hub.tx.Revive.call 0x03e9…6eB1 0x42cbb15c --from dotns-admin

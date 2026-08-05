@@ -4,6 +4,7 @@ import {
   decodeRevertData,
   encodeFunctionCall,
   ethereumAddressFromPrivateKey,
+  ethereumKeyFromMnemonic,
   generateEthereumPrivateKey,
   isEthereumPrivateKey,
   limbsToU256,
@@ -198,5 +199,30 @@ describe("u256 limbs", () => {
     expect(() => u256ToLimbs(-1n)).toThrow();
     expect(() => u256ToLimbs(1n << 256n)).toThrow();
     expect(() => limbsToU256([1n, 2n])).toThrow("Expected 4 u64 limbs");
+  });
+});
+
+describe("ethereumKeyFromMnemonic", () => {
+  // Anvil/hardhat "junk" phrase, index 0 — the canonical MetaMask-compat vector.
+  test("derives the anvil #0 key at m/44'/60'/0'/0/0", async () => {
+    const key = await ethereumKeyFromMnemonic(
+      "test test test test test test test test test test test junk",
+    );
+    expect(key).toBe("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80");
+  });
+
+  // The substrate dev phrase at indices 0/1 reproduces the well-known
+  // Moonbeam/revive dev accounts Alith and Baltathar.
+  test("derives Alith and Baltathar from the substrate dev phrase", async () => {
+    const DEV_PHRASE = "bottom drive obey lake curtain smoke basket hold race lonely fit walk";
+    const alith = await ethereumKeyFromMnemonic(DEV_PHRASE, 0);
+    expect(alith).toBe("0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133");
+    expect(bytesToHex(await ethereumAddressFromPrivateKey(alith))).toBe(
+      "f24ff3a9cf04c71dbc94d0b566f7a27b94566cac",
+    );
+    const baltathar = await ethereumKeyFromMnemonic(DEV_PHRASE, 1);
+    expect(bytesToHex(await ethereumAddressFromPrivateKey(baltathar))).toBe(
+      "3cd0a705a2dc65e5b1e1205896baa2be8a07c6e0",
+    );
   });
 });

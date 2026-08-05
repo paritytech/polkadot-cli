@@ -93,6 +93,18 @@ describe("ethereum tx guards (CLI)", { timeout: 15_000 }, () => {
     scheme: "ethereum",
   };
 
+  test("ordinary pallet call from a derived -eth identity errors with guidance", async () => {
+    const { stderr, exitCode } = await runCli([
+      "tx.System.remark",
+      "0xdead",
+      "--from",
+      "alice-eth",
+    ]);
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain("cannot sign substrate extrinsics");
+    expect(stderr).toContain("Revive.call");
+  });
+
   test("ordinary pallet call from an ethereum account errors with guidance", async () => {
     const { stderr, exitCode } = await runCli(
       ["tx.System.remark", "0xdead", "--from", "eth-admin"],

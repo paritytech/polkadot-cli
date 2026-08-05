@@ -16,6 +16,7 @@ import {
   bytesToHex,
   createNewAccount,
   DEV_NAMES,
+  type EthereumIdentity,
   fromSs58,
   getDevAddress,
   importAccount,
@@ -23,6 +24,7 @@ import {
   isHexPublicKey,
   publicKeyToHex,
   resolveAccountExpandedSecret,
+  resolveEthereumIdentity,
   resolveSecret,
   secretKind,
   toSs58,
@@ -1105,6 +1107,8 @@ async function accountInspect(
   let storedAccount: StoredAccount | undefined;
   let isDev = false;
   let isH160Fallback = false;
+  // Set when the input is a `<base>-eth` derived ethereum identity.
+  let ethIdentity: EthereumIdentity | undefined;
   // Synthetic source for the stateless-derivation branch — same shape as
   // StoredAccount.source so the JSON/pretty-print branches downstream don't
   // need a separate code path.
@@ -1165,17 +1169,41 @@ async function accountInspect(
         process.exit(1);
       }
     }
-    // 3. Hex public key
+    // 3. `<base>-eth` — ethereum identity derived from a mnemonic-backed
+    // account (hex/H160/SS58 inputs can never contain "-", so this is safe
+    // to check before them).
+    else if (input!.toLowerCase().endsWith("-eth")) {
+      let identity: EthereumIdentity | null = null;
+      try {
+        identity = await resolveEthereumIdentity(input!);
+      } catch (err) {
+        console.error((err as Error).message);
+        process.exit(1);
+      }
+      if (!identity) {
+        console.error(
+          `Cannot identify "${input}": no account "${input!.slice(0, -4)}" to derive an ethereum identity from.`,
+        );
+        process.exit(1);
+      }
+      ethIdentity = identity;
+      name = input!.toLowerCase();
+      hasSecret = true;
+      publicKeyHex = publicKeyToHex(
+        h160ToFallbackAccountId(await ethereumAddressFromPrivateKey(identity.privateKey)),
+      );
+    }
+    // 4. Hex public key
     else if (isHexPublicKey(input!)) {
       publicKeyHex = input!;
     }
-    // 4. H160 (20-byte hex) — revive fallback AccountId32 (H160 || 0xEE * 12)
+    // 5. H160 (20-byte hex) — revive fallback AccountId32 (H160 || 0xEE * 12)
     else if (isH160Hex(input!)) {
       const fallback = h160ToFallbackAccountId(h160FromHex(input!));
       publicKeyHex = publicKeyToHex(fallback);
       isH160Fallback = true;
     }
-    // 5. Try SS58 decode
+    // 6. Try SS58 decode
     else {
       try {
         const decoded = fromSs58(input!);
@@ -1191,6 +1219,27 @@ async function accountInspect(
 
   const ss58 = toSs58(publicKeyHex!, prefix);
   const h160Hex = toEip55(accountIdToH160(nobleHexToBytes(publicKeyHex!.slice(2))));
+
+  // Preview of the DERIVED ethereum identity for mnemonic-backed accounts
+  // (dev or stored): a different on-chain identity that shares the phrase,
+  // selected at signing time with `--from <name>-eth`. Not derivable (seed/
+  // expanded/watch-only/env-unset/already-ethereum) → silently omitted.
+  let derivedEthereum: { address: string; from: string; path: string } | undefined;
+  if (!ethIdentity && (isDev || storedAccount)) {
+    const fromName = `${(storedAccount?.name ?? input!).toLowerCase()}-eth`;
+    try {
+      const identity = await resolveEthereumIdentity(fromName);
+      if (identity?.derivedFrom) {
+        derivedEthereum = {
+          address: toEip55(await ethereumAddressFromPrivateKey(identity.privateKey)),
+          from: fromName,
+          path: `m/44'/60'/0'/0/${identity.derivedFrom.index}`,
+        };
+      }
+    } catch {
+      // no derived identity for this account — nothing to show
+    }
+  }
 
   let privateKeyHex: string | undefined;
   // The original stored secret revealed alongside the expanded private key.
@@ -1210,7 +1259,9 @@ async function accountInspect(
       process.exit(1);
     }
     try {
-      if (storedAccount && isEthereumAccount(storedAccount)) {
+      if (ethIdentity) {
+        privateKeyHex = ethIdentity.privateKey;
+      } else if (storedAccount && isEthereumAccount(storedAccount)) {
         // The secp256k1 private key IS the stored secret — no expansion step.
         privateKeyHex = resolveSecret(storedAccount.secret!);
       } else {
@@ -1251,6 +1302,13 @@ async function accountInspect(
     kindLabel = "dev";
   } else if (isH160Fallback) {
     kindLabel = "revive H160 fallback";
+  } else if (ethIdentity) {
+    kindLabel = ethIdentity.derivedFrom
+      ? `signer (ethereum, derived from ${ethIdentity.derivedFrom.name})`
+      : "signer (ethereum)";
+    if (ethIdentity.derivedFrom) {
+      derivationLine = `m/44'/60'/0'/0/${ethIdentity.derivedFrom.index}`;
+    }
   } else if (storedAccount) {
     const k = classifyAccount(storedAccount);
     if (k === "pallet" && storedAccount.source?.kind === "pallet") {
@@ -1305,10 +1363,14 @@ async function accountInspect(
         result.source = storedAccount.source;
       }
     }
-    if (storedAccount && isEthereumAccount(storedAccount)) result.scheme = "ethereum";
+    if (ethIdentity || (storedAccount && isEthereumAccount(storedAccount))) {
+      result.scheme = "ethereum";
+    }
+    if (ethIdentity?.derivedFrom) result.derivedFrom = ethIdentity.derivedFrom.name;
     if (derivationLine) result.derivationPath = derivationLine;
     if (envLine) result.env = envLine.replace(/^\$/, "");
     if (bandersnatch && Object.keys(bandersnatch).length > 0) result.bandersnatch = bandersnatch;
+    if (derivedEthereum) result.ethereum = derivedEthereum;
     if (revealedSecret) result[revealedSecret.field] = revealedSecret.value;
     if (privateKeyHex) result.privateKey = privateKeyHex;
     console.log(formatJson(result));
@@ -1319,6 +1381,11 @@ async function accountInspect(
     console.log(`  ${BOLD}Public Key:${RESET}  ${publicKeyHex!}`);
     console.log(`  ${BOLD}SS58:${RESET}        ${ss58}`);
     console.log(`  ${BOLD}H160:${RESET}        ${h160Hex}`);
+    if (derivedEthereum) {
+      console.log(
+        `  ${BOLD}Ethereum:${RESET}    ${derivedEthereum.address} ${DIM}(--from ${derivedEthereum.from}, ${derivedEthereum.path})${RESET}`,
+      );
+    }
     if (sourceLine) console.log(`  ${BOLD}Source:${RESET}      ${sourceLine}`);
     if (derivationLine) console.log(`  ${BOLD}Derivation:${RESET}  ${derivationLine}`);
     if (envLine) console.log(`  ${BOLD}Env:${RESET}         ${envLine}`);
@@ -1350,7 +1417,7 @@ async function accountInspect(
     }
     if (privateKeyHex) {
       const caption =
-        storedAccount && isEthereumAccount(storedAccount)
+        ethIdentity || (storedAccount && isEthereumAccount(storedAccount))
           ? "(secp256k1, 32 bytes — never share)"
           : "(sr25519 expanded, 64 bytes — never share)";
       console.log(`  ${BOLD}Private Key:${RESET} ${privateKeyHex}`);

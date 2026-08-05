@@ -4,10 +4,9 @@ import { getViewBuilder } from "@polkadot-api/view-builder";
 import type { TxBestBlocksState, TxBroadcasted, TxEvent, TxFinalized } from "polkadot-api";
 import { Binary } from "polkadot-api";
 import { stringify as stringifyYaml } from "yaml";
-import { isEthereumAccount } from "../config/accounts-types.ts";
 import { loadConfig, resolveChain } from "../config/store.ts";
 import { primaryRpc } from "../config/types.ts";
-import { findStoredAccount, resolveAccountSigner, toSs58 } from "../core/accounts.ts";
+import { resolveAccountSigner, resolveEthereumIdentity, toSs58 } from "../core/accounts.ts";
 import { type ClientHandle, createChainClient } from "../core/client.ts";
 import { papiLink, pjsAppsLink } from "../core/explorers.ts";
 import type { Lookup, MetadataBundle } from "../core/metadata.ts";
@@ -306,13 +305,13 @@ export async function handleTx(
 
   const decodeOnly = opts.encode || opts.toYaml || opts.toJson;
 
-  // Ethereum-scheme signer: the account can't sign substrate extrinsics — its
-  // contract call is priced, signed as an EIP-1559 tx, and submitted through
-  // the unsigned Revive.eth_transact extrinsic instead.
+  // Ethereum signer (a --scheme ethereum account, or the `<name>-eth` identity
+  // derived from a mnemonic-backed account): it can't sign substrate
+  // extrinsics — its contract call is priced, signed as an EIP-1559 tx, and
+  // submitted through the unsigned Revive.eth_transact extrinsic instead.
   if (!decodeOnly && !opts.unsigned && opts.from) {
-    const stored = await findStoredAccount(opts.from);
-    if (stored && isEthereumAccount(stored)) {
-      return handleEthereumTx(target, args, stored.name, chainName, chainConfig, opts);
+    if ((await resolveEthereumIdentity(opts.from)) !== null) {
+      return handleEthereumTx(target, args, opts.from, chainName, chainConfig, opts);
     }
   }
 

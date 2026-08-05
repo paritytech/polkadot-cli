@@ -2360,3 +2360,115 @@ describe("dot account --scheme ethereum", { timeout: 15_000 }, () => {
     expect(stderr).toContain("cannot sign substrate extrinsics");
   });
 });
+
+// Derived ethereum identities — `<name>-eth` selects the BIP44 key
+// (m/44'/60'/0'/0/<index>) of a mnemonic-backed account. Dev accounts use
+// their position as the index: alice-eth = Alith, bob-eth = Baltathar.
+// @ts-expect-error Bun supports describe(label, options, fn) at runtime
+describe("derived ethereum identities (-eth suffix)", { timeout: 15_000 }, () => {
+  const ALITH = "0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac";
+  const MNEMONIC_ACCOUNT: StoredAccount = {
+    name: "signer",
+    secret: "test test test test test test test test test test test junk",
+    publicKey: "0x44a996beb1eef7bdcab976ab6d2ca26104834164ecf28fb375600576fcc6eb0f",
+    derivationPath: "",
+  };
+
+  test("inspect alice-eth resolves to Alith", async () => {
+    const { stdout, exitCode } = await runCli(["account", "inspect", "alice-eth", "--json"]);
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    expect(result.h160).toBe(ALITH);
+    expect(result.kind).toBe("signer (ethereum, derived from alice)");
+    expect(result.scheme).toBe("ethereum");
+    expect(result.derivationPath).toBe("m/44'/60'/0'/0/0");
+  });
+
+  test("inspect bob-eth resolves to Baltathar (index 1)", async () => {
+    const { stdout, exitCode } = await runCli(["account", "inspect", "bob-eth", "--json"]);
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    expect(result.h160).toBe("0x3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0");
+    expect(result.derivationPath).toBe("m/44'/60'/0'/0/1");
+  });
+
+  test("inspect alice-eth --show-secret reveals the derived secp256k1 key", async () => {
+    const { stdout, exitCode } = await runCli([
+      "account",
+      "inspect",
+      "alice-eth",
+      "--show-secret",
+      "--json",
+    ]);
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    expect(result.privateKey).toBe(
+      "0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133",
+    );
+    expect(result.mnemonic).toBeUndefined();
+  });
+
+  test("stored mnemonic account derives its -eth identity at index 0", async () => {
+    const { stdout, exitCode } = await runCli(["account", "inspect", "signer-eth", "--json"], {
+      accounts: [MNEMONIC_ACCOUNT],
+    });
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    // MetaMask-compatible: anvil junk phrase index 0
+    expect(result.h160).toBe("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+    expect(result.derivedFrom).toBe("signer");
+  });
+
+  test("base inspect shows the derived ethereum identity", async () => {
+    const { stdout, exitCode } = await runCli(["account", "inspect", "alice", "--json"]);
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    expect(result.ethereum).toEqual({
+      address: ALITH,
+      from: "alice-eth",
+      path: "m/44'/60'/0'/0/0",
+    });
+  });
+
+  test("a real stored account named *-eth wins over derivation", async () => {
+    const watchOnly: StoredAccount = {
+      name: "signer-eth",
+      publicKey: "0x44a996beb1eef7bdcab976ab6d2ca26104834164ecf28fb375600576fcc6eb0f",
+      derivationPath: "",
+    };
+    const { stdout, exitCode } = await runCli(["account", "inspect", "signer-eth", "--json"], {
+      accounts: [MNEMONIC_ACCOUNT, watchOnly],
+    });
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    expect(result.kind).toBe("watch-only");
+    expect(result.scheme).toBeUndefined();
+  });
+
+  test("seed-backed base errors with an import hint", async () => {
+    const seeded: StoredAccount = {
+      name: "seeded",
+      secret: "0x1111111111111111111111111111111111111111111111111111111111111111",
+      publicKey: "0x44a996beb1eef7bdcab976ab6d2ca26104834164ecf28fb375600576fcc6eb0f",
+      derivationPath: "",
+    };
+    const { stderr, exitCode } = await runCli(["account", "inspect", "seeded-eth"], {
+      accounts: [seeded],
+    });
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain("BIP44 derivation needs the BIP39 mnemonic");
+    expect(stderr).toContain("--scheme ethereum");
+  });
+
+  test("unknown base errors", async () => {
+    const { stderr, exitCode } = await runCli(["account", "inspect", "nobody-eth"]);
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain('no account "nobody"');
+  });
+
+  test("sign refuses a derived ethereum identity", async () => {
+    const { stderr, exitCode } = await runCli(["sign", "hello", "--from", "alice-eth"]);
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain("cannot sign substrate extrinsics");
+  });
+});

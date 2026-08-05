@@ -522,23 +522,31 @@ dot account add raw-dave --secret "$SECRET"   # same address as dave, can sign
 
 Mapping rule (offline, matches current `polkadot-sdk` master): if the last 12 bytes of the AccountId32 are `0xEE` the H160 is the first 20 bytes (eth-derived); otherwise `keccak256(accountId32)` and take the last 20. The reverse direction always returns the `H160 || 0xEE * 12` fallback — the full mapping after `pallet_revive.map_account` lives in on-chain `AddressSuffix` storage and isn't recoverable offline. Older `stable2412` runtimes used plain `accountId32[..20]` truncation; if you target one, compute manually.
 
-### Ethereum (secp256k1) Accounts + Contract Calls via `eth_transact`
+### Ethereum Identities (secp256k1) + Contract Calls via `eth_transact`
 
-`--scheme ethereum` stores a secp256k1 key so `dot` can act as an Ethereum-key identity on pallet-revive chains — needed when a contract's `owner()`/role holders are eth addresses that a substrate signer's mapped H160 can never equal:
+Revive contracts often gate admin functions on eth-key owners/roles — addresses a substrate signer's mapped H160 can never equal (it's a keccak hash, not a key). Two ways to act as an eth identity:
 
 ```bash
+# 1. DERIVED — every mnemonic-backed account has one, selected with the -eth suffix.
+#    Same phrase, BIP44 m/44'/60'/0'/0/0 (MetaMask-compatible). Dev accounts use their
+#    position as the index: alice-eth = Alith, bob-eth = Baltathar, …
+dot account inspect alice-eth        # Alith: 0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac
+dot account inspect alice            # base inspect shows the Ethereum line + --from hint
+
+# 2. DEDICATED — import/generate a raw key (MetaMask/deployer exports)
 dot account add dotns-admin --scheme ethereum --secret 0x<64-hex-privkey>
-dot account create hot-wallet --scheme ethereum       # generates + prints the key
+dot account create hot-wallet --scheme ethereum
 dot account add ci-admin --scheme ethereum --env ADMIN_KEY
-# Identity = EIP-55 H160; the printed SS58 is the fallback account (H160‖0xEE×12).
-# Fund THAT address for fees; read nonce/balance through it like any account.
 ```
 
-With an ethereum `--from`, `tx.Revive.call` takes eth-style args and submits an EIP-1559 tx wrapped in unsigned `Revive.eth_transact` (no eth-rpc sidecar; executes with the eth address as `msg.sender`):
+Identity = EIP-55 H160; the printed SS58 is the fallback account (H160‖0xEE×12) — fund THAT address for fees; read nonce/balance through it like any account. ⚠️ One phrase = TWO identities: substrate-signed `Revive.call` from `alice` acts as her *mapped* H160; `--from alice-eth` acts as the BIP44 address — contracts see different `msg.sender`. A real stored account named `*-eth` wins over derivation; hex-seed/expanded/watch-only bases can't derive (error suggests importing a key). `Revive.map_account` is unrelated to signing — it makes value sent to a mapped H160 reach the real account (auto on chains with `const Revive.AutoMap = true`, e.g. previewnet).
+
+With an ethereum `--from` (either kind), `tx.Revive.call` takes eth-style args and submits an EIP-1559 tx wrapped in unsigned `Revive.eth_transact` (no eth-rpc sidecar; executes with the eth address as `msg.sender`):
 
 ```bash
 # Cast-style ABI signature, raw calldata, or bare value transfer (wei)
 dot preview-asset-hub.tx.Revive.call 0xf209…899B 'whiteListAddress(address,bool)' 0xAbC… true --from dotns-admin
+dot preview-asset-hub.tx.Revive.call 0x03e9…6eB1 'getBlockNumber()' --from alice-eth
 dot preview-asset-hub.tx.Revive.call 0x03e9…6eB1 0x42cbb15c --from dotns-admin
 dot preview-asset-hub.tx.Revive.call 0x7099…79C8 --value 1000000000000000000 --from dotns-admin
 # --dry-run prints gas, storage deposit, max fee, decoded revert/return data

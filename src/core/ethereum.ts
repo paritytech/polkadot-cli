@@ -47,6 +47,20 @@ export async function generateEthereumPrivateKey(): Promise<string> {
   return Secp256k1.randomPrivateKey();
 }
 
+// Derive the MetaMask-compatible BIP44 ethereum key from a BIP39 mnemonic:
+// m/44'/60'/0'/0/<index>. Stored accounts use index 0 — importing the same
+// phrase into MetaMask yields the same address. Dev accounts use their
+// position as the index, which on the substrate dev phrase reproduces the
+// well-known Moonbeam/revive dev accounts (0 = Alith, 1 = Baltathar, …).
+export async function ethereumKeyFromMnemonic(mnemonic: string, index = 0): Promise<string> {
+  const [Mnemonic, HdKey] = (await Promise.all([
+    lazyImport("ox/Mnemonic"),
+    lazyImport("ox/HdKey"),
+  ])) as [typeof import("ox/Mnemonic"), typeof import("ox/HdKey")];
+  const seed = Mnemonic.toSeed(mnemonic);
+  return HdKey.fromSeed(seed).derive(HdKey.path({ index })).privateKey;
+}
+
 // The Ethereum address (20 bytes) controlled by a secp256k1 private key:
 // keccak256(uncompressed pubkey)[12..].
 export async function ethereumAddressFromPrivateKey(privateKey: string): Promise<Uint8Array> {
