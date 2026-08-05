@@ -151,6 +151,23 @@ describe("encodeFunctionCall", () => {
     await expect(encodeFunctionCall("setFlag(bool)", ["yes"])).rejects.toThrow("not a valid bool");
   });
 
+  test("rejects invalid hex for bytes arguments", async () => {
+    await expect(encodeFunctionCall("setBytes(bytes)", ["zz"])).rejects.toThrow("not valid bytes");
+  });
+
+  test("rejects malformed JSON for composite arguments", async () => {
+    await expect(encodeFunctionCall("setOwners(address[])", ["not json"])).rejects.toThrow(
+      "must be JSON",
+    );
+  });
+
+  test("encodes tuple arguments passed as JSON", async () => {
+    const data = await encodeFunctionCall("setPair((address,uint256))", [
+      '["0x70997970C51812dc3A010C7d01b50e0d17dc79C8", "42"]',
+    ]);
+    expect(data).toContain("70997970c51812dc3a010c7d01b50e0d17dc79c8");
+  });
+
   test("encodes array arguments passed as JSON", async () => {
     const data = await encodeFunctionCall("setOwners(address[])", [
       '["0x70997970C51812dc3A010C7d01b50e0d17dc79C8"]',

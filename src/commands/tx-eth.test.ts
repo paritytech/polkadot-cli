@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import type { StoredAccount } from "../config/accounts-types.ts";
 import { runCli } from "./__fixtures__/run-cli.ts";
-import { parseEthereumCallArgs, parseValueOption } from "./tx-eth.ts";
+import {
+  buildGenericTransaction,
+  formatEthTransactError,
+  handleEthereumTx,
+  parseEthereumCallArgs,
+  parseValueOption,
+  toHexData,
+} from "./tx-eth.ts";
 
 const DEST = "0x03e9Cb96dF143b2339b75E6A0dB018fC79cE6eB1";
 
@@ -140,5 +147,130 @@ describe("ethereum tx guards (CLI)", { timeout: 15_000 }, () => {
     );
     expect(exitCode).toBe(0);
     expect(stderr).not.toContain("cannot sign");
+  });
+});
+
+// In-process coverage of the pure helpers and pre-connect guards (subprocess
+// runCli tests above verify behavior but earn no coverage instrumentation).
+describe("tx-eth helpers (in-process)", () => {
+  test("toHexData normalizes Binary-likes, Uint8Array, and everything else", () => {
+    expect(toHexData({ asHex: () => "0x1234" })).toBe("0x1234");
+    expect(toHexData(new Uint8Array([0xde, 0xad]))).toBe("0xdead");
+    expect(toHexData("garbage")).toBe("0x");
+    expect(toHexData(undefined)).toBe("0x");
+  });
+
+  test("buildGenericTransaction produces the JSON shape with string limbs", () => {
+    const tx = buildGenericTransaction({
+      from: "0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac",
+      to: DEST,
+      data: "0x42cbb15c",
+      value: (1n << 64n) + 7n,
+      nonce: 3n,
+    });
+    expect(tx.from).toBe("0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac");
+    expect(tx.to).toBe(DEST);
+    expect(tx.input.data).toBe("0x42cbb15c");
+    expect(tx.nonce).toEqual(["3", "0", "0", "0"]);
+    expect(tx.value).toEqual(["7", "1", "0", "0"]);
+    expect(tx.chain_id).toBe(null);
+    expect(tx.authorization_list).toEqual([]);
+  });
+
+  test("formatEthTransactError decodes revert data and messages", async () => {
+    const boom =
+      "0x08c379a0" +
+      "0000000000000000000000000000000000000000000000000000000000000020" +
+      "0000000000000000000000000000000000000000000000000000000000000004" +
+      "626f6f6d00000000000000000000000000000000000000000000000000000000";
+    expect(await formatEthTransactError({ type: "Data", value: { asHex: () => boom } })).toBe(
+      "Contract reverted: boom",
+    );
+    expect(
+      await formatEthTransactError({ type: "Data", value: { asHex: () => "0xdeadbeef" } }),
+    ).toBe("Contract reverted with data: 0xdeadbeef");
+    expect(await formatEthTransactError({ type: "Message", value: "gas too low" })).toBe(
+      "gas too low",
+    );
+    expect(await formatEthTransactError({ type: "Weird", value: 1 })).toContain("Weird");
+  });
+});
+
+describe("handleEthereumTx pre-connect guards (in-process)", () => {
+  const chainConfig = { rpc: "wss://unused.invalid" };
+
+  test("rejects raw call hex", async () => {
+    await expect(
+      handleEthereumTx("0x00071234", [], "eth-admin", "polkadot", chainConfig, {}),
+    ).rejects.toThrow("Raw call hex is a substrate call");
+  });
+
+  test("rejects non-Revive.call targets", async () => {
+    await expect(
+      handleEthereumTx("System.remark", ["0xdead"], "eth-admin", "polkadot", chainConfig, {}),
+    ).rejects.toThrow("cannot sign substrate extrinsics");
+  });
+
+  test("rejects inapplicable transaction flags", async () => {
+    for (const opts of [{ tip: "1" }, { mortality: "immortal" }, { asset: "{}" }, { ext: "{}" }]) {
+      await expect(
+        handleEthereumTx("Revive.call", [DEST], "eth-admin", "polkadot", chainConfig, opts),
+      ).rejects.toThrow("does not apply to ethereum transactions");
+    }
+  });
+
+  test("rejects malformed --value and args before touching the network", async () => {
+    await expect(
+      handleEthereumTx("Revive.call", [DEST], "eth-admin", "polkadot", chainConfig, {
+        value: "nope",
+      }),
+    ).rejects.toThrow("Invalid --value");
+    await expect(
+      handleEthereumTx("Revive.call", [], "eth-admin", "polkadot", chainConfig, {}),
+    ).rejects.toThrow("Contract address is required");
+  });
+});
+
+// Live previewnet verification of the full dry-run flow: resolve alice-eth
+// (Alith), connect, fetch metadata, price via ReviveApi.eth_transact, print
+// the report. Needs no funds — a value-0 dry-run skips balance checks. Runs
+// as a subprocess: load-meta.test.ts installs process-global mock.module
+// replacements for core/client.ts, so an in-process variant of this test
+// would silently get the mocked (revive-less) fixture chain in full-suite
+// runs. This is the one test in the file that depends on
+// wss://previewnet.substrate.dev.
+// @ts-expect-error Bun supports describe(label, options, fn) at runtime
+describe("live dry-run (previewnet)", { timeout: 90_000 }, () => {
+  // Retry: previewnet occasionally times out under full-suite network concurrency.
+  // @ts-expect-error Bun supports test(label, options, fn) at runtime
+  test("prices a contract call as the derived alice-eth identity", { retry: 2 }, async () => {
+    const { stdout, exitCode } = await runCli(
+      [
+        "preview-asset-hub.tx.Revive.call",
+        DEST,
+        "getBlockNumber()",
+        "--from",
+        "alice-eth",
+        "--dry-run",
+      ],
+      {
+        noDefaultChain: true,
+        files: {
+          // Replace the fixture config wholesale: preview-asset-hub must NOT
+          // be in the fixture's chain list, or run-cli would hardlink the
+          // polkadot fixture metadata for it and the CLI would decode against
+          // a revive-less runtime instead of fetching the real one.
+          ".polkadot/config.json": JSON.stringify({
+            chains: { "preview-asset-hub": { rpc: "wss://previewnet.substrate.dev/asset-hub" } },
+          }),
+        },
+      },
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("eth chain id 420420417");
+    expect(stdout).toContain("0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac"); // Alith
+    expect(stdout).toContain("getBlockNumber()");
+    expect(stdout).toContain("Gas:");
+    expect(stdout).toContain("Return: 0x");
   });
 });

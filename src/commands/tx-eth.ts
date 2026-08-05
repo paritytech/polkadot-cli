@@ -438,4 +438,10 @@ export async function handleEthereumTx(
   }
 }
 
-export { parseEthereumCallArgs, parseValueOption };
+export {
+  buildGenericTransaction,
+  formatEthTransactError,
+  parseEthereumCallArgs,
+  parseValueOption,
+  toHexData,
+};
