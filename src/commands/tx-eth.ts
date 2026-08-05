@@ -1,4 +1,4 @@
-import { Binary } from "polkadot-api";
+import { Binary, type TxEvent } from "polkadot-api";
 import type { ChainConfig } from "../config/types.ts";
 import { primaryRpc } from "../config/types.ts";
 import { resolveEthereumPrivateKey, toSs58 } from "../core/accounts.ts";
@@ -333,7 +333,7 @@ export async function handleEthereumTx(
     const observable = clientHandle.client.submitAndWatch(
       generalTx,
       opts.at,
-    ) as import("rxjs").Observable<import("polkadot-api").TxEvent>;
+    ) as import("rxjs").Observable<TxEvent>;
 
     const rpcUrl = primaryRpc(opts.rpc ?? chainConfig.rpc);
 

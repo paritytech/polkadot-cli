@@ -315,6 +315,13 @@ export async function handleTx(
     }
   }
 
+  if (opts.value !== undefined) {
+    throw new CliError(
+      "--value only applies to ethereum transactions (Revive.eth_transact), i.e. Revive.call " +
+        "with --from an ethereum account. For substrate extrinsics, pass the amount as a call argument.",
+    );
+  }
+
   const signer = decodeOnly || opts.unsigned ? undefined : await resolveAccountSigner(opts.from!);
 
   let clientHandle: ClientHandle | undefined;

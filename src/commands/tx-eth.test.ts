@@ -139,6 +139,19 @@ describe("ethereum tx guards (CLI)", { timeout: 15_000 }, () => {
     expect(stderr).toContain("--tip does not apply to ethereum transactions");
   });
 
+  test("--value on a substrate-signed tx is rejected, not silently ignored", async () => {
+    const { stderr, exitCode } = await runCli([
+      "tx.System.remark",
+      "0xdead",
+      "--from",
+      "alice",
+      "--value",
+      "5",
+    ]);
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain("--value only applies to ethereum transactions");
+  });
+
   test("--encode still encodes the substrate call without touching the eth path", async () => {
     // decode-only flags bypass the signer entirely — unchanged behavior.
     const { stderr, exitCode } = await runCli(
@@ -238,12 +251,14 @@ describe("handleEthereumTx pre-connect guards (in-process)", () => {
 // replacements for core/client.ts, so an in-process variant of this test
 // would silently get the mocked (revive-less) fixture chain in full-suite
 // runs. This is the one test in the file that depends on
-// wss://previewnet.substrate.dev.
+// wss://previewnet.substrate.dev, so it is opt-in: set DOT_LIVE_TESTS=1 to run
+// it. The default `bun test` stays offline and deterministic.
+const liveTest = process.env.DOT_LIVE_TESTS ? test : test.skip;
 // @ts-expect-error Bun supports describe(label, options, fn) at runtime
 describe("live dry-run (previewnet)", { timeout: 90_000 }, () => {
   // Retry: previewnet occasionally times out under full-suite network concurrency.
   // @ts-expect-error Bun supports test(label, options, fn) at runtime
-  test("prices a contract call as the derived alice-eth identity", { retry: 2 }, async () => {
+  liveTest("prices a contract call as the derived alice-eth identity", { retry: 2 }, async () => {
     const { stdout, exitCode } = await runCli(
       [
         "preview-asset-hub.tx.Revive.call",
