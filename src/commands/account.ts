@@ -68,6 +68,7 @@ ${BOLD}Usage:${RESET}
   $ dot account add <name> --secret 0x<128 hex>                      Import a raw 64-byte sr25519 private key (no --path)
   $ dot account add <name> --env <VAR> [--path <derivation>]         Import account backed by env variable
   $ dot account add <name> --scheme ethereum --secret 0x<64 hex>     Import an Ethereum (secp256k1) private key
+  $ dot account inspect <name>-eth                                   Ethereum identity derived from a mnemonic account (alice-eth = Alith)
   $ dot account add <name> --parachain <id> --parachain-type <t>     Derive a parachain sovereign (t = child|sibling)
   $ dot account add <name> --pallet-id <8 chars or 0x hex>           Derive a pallet sovereign (e.g. py/trsry)
   $ dot account create|new <name> [--path <derivation>]              Create a new account
@@ -117,8 +118,10 @@ ${YELLOW}Note: Secrets are stored unencrypted in ~/.polkadot/accounts.json.
       0x 64-byte raw sr25519 private key (the value --show-secret prints).
       Raw private keys cannot be HD-derived, so --path is rejected for them.
       With --scheme ethereum, --secret is a 0x 32-byte secp256k1 private key.
-      Ethereum accounts sign Revive.eth_transact transactions, not substrate
-      extrinsics.${RESET}
+      Ethereum identities sign Revive.eth_transact transactions, not substrate
+      extrinsics. Mnemonic-backed accounts also have a derived ethereum
+      identity (BIP44 m/44'/60'/0'/0/0 of the same phrase) — select it with
+      the -eth name suffix, e.g. --from alice-eth.${RESET}
 `.trimStart();
 
 export function registerAccountCommands(cli: CAC) {

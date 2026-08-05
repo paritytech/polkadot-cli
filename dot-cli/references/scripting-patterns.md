@@ -379,7 +379,8 @@ fi
 
 Notes:
 
-- Fund the eth account's **fallback SS58** (`dot account inspect <name> --json | jq -r .ss58`) — fees come from there.
+- `--from` accepts a stored `--scheme ethereum` account or a **derived identity**: `--from alice-eth` signs with the BIP44 key (m/44'/60'/0'/0/0) of alice's mnemonic — for dev accounts this reproduces Alith/Baltathar/….
+- Fund the eth identity's **fallback SS58** (`dot account inspect <name>-eth --json | jq -r .ss58`) — fees come from there.
 - `--dry-run` on the write prints gas, storage deposit, max fee, and the decoded revert if the contract would reject the call — nothing is submitted.
 - `--value <wei>` sends value with the call (18 EVM decimals; on a 10-decimals chain the wei→planck ratio is 10^8).
 - The nonce for rapid-fire sequencing is the fallback account's `System.Account` nonce (`--nonce` overrides).
