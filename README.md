@@ -47,12 +47,9 @@ Ships with Polkadot and all system parachains preconfigured with multiple fallba
 | | `polkadot-people` |
 | Paseo (testnet) | `paseo` (relay) |
 | | `paseo-asset-hub` |
-| | `paseo-bridge-hub` |
-| | `paseo-collectives` |
-| | `paseo-coretime` |
 | | `paseo-people` |
 
-Each chain ships with multiple RPC endpoints from decentralized infrastructure providers (IBP, Dotters, Dwellir, and others). The CLI automatically falls back to the next endpoint if the primary is unreachable.
+Each chain ships with multiple RPC endpoints from decentralized infrastructure providers (Parity, Dwellir, Gatotech, LuckyFriday, Stakeworld, and others). The CLI automatically falls back to the next endpoint if the primary is unreachable.
 
 ## Install
 
@@ -201,8 +198,8 @@ The default list is intentionally compact — names + relay tree + parachain IDs
 ```
 Configured Chains
 
-  polkadot  wss://polkadot.ibp.network
-       wss://polkadot-rpc.n.dwellir.com
+  polkadot  wss://polkadot-rpc.n.dwellir.com
+       wss://polkadot.gatotech.network
        wss://rpc.polkadot.io
   ├─ polkadot-asset-hub [1000]  wss://polkadot-asset-hub-rpc.polkadot.io
        ...
@@ -216,7 +213,7 @@ dot chain info polkadot
 # polkadot
 #
 #   rpc:
-#     wss://polkadot.ibp.network
+#     wss://polkadot-rpc.n.dwellir.com
 #     wss://rpc.polkadot.io
 #     ...
 #   parachains:

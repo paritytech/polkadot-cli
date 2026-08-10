@@ -44,7 +44,12 @@ export async function createChainClient(
       `No RPC endpoint configured for chain "${chainName}". Use --rpc or configure one with: dot chain add ${chainName} --rpc <url>`,
     );
   }
-  const provider = getWsProvider(rpc, { timeout: 10_000 });
+  // The provider rotates through `rpc` on each reconnect attempt, so this
+  // timeout is what an unresponsive endpoint costs before the next one is
+  // tried. Endpoints that refuse outright (DNS failure, connection refused)
+  // fail fast and never reach it; ones that accept the socket and then stall
+  // (a dead node behind a live proxy) burn it in full.
+  const provider = getWsProvider(rpc, { timeout: 4_000 });
 
   const client = createClient(provider, {
     getMetadata: async () => loadMetadata(chainName),

@@ -148,9 +148,6 @@ describe("loadConfig merge behavior", () => {
       ["polkadot-coretime", "polkadot", 1005],
       ["polkadot-people", "polkadot", 1004],
       ["paseo-asset-hub", "paseo", 1000],
-      ["paseo-bridge-hub", "paseo", 1002],
-      ["paseo-collectives", "paseo", 1001],
-      ["paseo-coretime", "paseo", 1005],
       ["paseo-people", "paseo", 1004],
     ] as const;
     for (const [name, relay, parachainId] of parachains) {
