@@ -131,14 +131,13 @@ The following chains are available out of the box — no `dot chain add` needed:
 | | `polkadot-collectives` |
 | | `polkadot-coretime` |
 | | `polkadot-people` |
+| | `polkadot-bulletin` |
 | Paseo (testnet) | `paseo` (relay) |
 | | `paseo-asset-hub` |
-| | `paseo-bridge-hub` |
-| | `paseo-collectives` |
-| | `paseo-coretime` |
 | | `paseo-people` |
+| | `paseo-bulletin` |
 
-Each chain ships with multiple RPC endpoints from decentralized infrastructure providers (IBP, Dotters, Dwellir, and others). The CLI automatically falls back to the next endpoint if the primary is unreachable. Use `dot chain info <name>` (or `dot chains -v`) to see all endpoints for a chain.
+Each chain ships with multiple RPC endpoints from decentralized infrastructure providers (Parity, Dwellir, Gatotech, LuckyFriday, Stakeworld, and others). The CLI automatically falls back to the next endpoint if the primary is unreachable. Use `dot chain info <name>` (or `dot chains -v`) to see all endpoints for a chain.
 
 ### Add a chain
 
@@ -154,7 +153,7 @@ dot chain add kusama --rpc wss://kusama-rpc.polkadot.io --rpc wss://kusama-rpc.d
 
 #### Naming convention
 
-Name chains as `{relay}-{parachain}`: the parent relay's name, a hyphen, then the parachain's role. This is the pattern every preconfigured chain already follows — `polkadot-asset-hub`, `polkadot-bridge-hub`, `paseo-coretime`, and so on — and the one to reuse for chains you add.
+Name chains as `{relay}-{parachain}`: the parent relay's name, a hyphen, then the parachain's role. This is the pattern every preconfigured chain already follows — `polkadot-asset-hub`, `polkadot-bridge-hub`, `paseo-people`, and so on — and the one to reuse for chains you add.
 
 | Chain kind | Recommended name | Examples |
 |------------|------------------|----------|
@@ -238,8 +237,8 @@ dot chain list --verbose
 ```
 Configured Chains
 
-  polkadot  wss://polkadot.ibp.network
-       wss://polkadot-rpc.n.dwellir.com
+  polkadot  wss://polkadot-rpc.n.dwellir.com
+       wss://polkadot.gatotech.network
        wss://rpc.polkadot.io
   ├─ polkadot-asset-hub [1000]  wss://polkadot-asset-hub-rpc.polkadot.io
        ...
@@ -257,7 +256,7 @@ dot chain info polkadot
 polkadot
 
   rpc:
-    wss://polkadot.ibp.network
+    wss://polkadot-rpc.n.dwellir.com
     wss://rpc.polkadot.io
     ...
   parachains:

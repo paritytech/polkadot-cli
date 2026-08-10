@@ -22,7 +22,9 @@ describe("createChainClient", () => {
     expect(mockGetWsProvider).toHaveBeenCalledTimes(1);
     const [endpoints, config] = mockGetWsProvider.mock.calls[0]!;
     expect(endpoints).toBe("wss://example.com");
-    expect(config).toHaveProperty("timeout", 10_000);
+    // Kept short so a stalled endpoint is abandoned quickly and the provider
+    // rotates to the next entry in the RPC list.
+    expect(config).toHaveProperty("timeout", 4_000);
 
     handle.destroy();
   });

@@ -43,7 +43,7 @@ describe("DEFAULT_CONFIG", () => {
 
   test("primaryRpc works with DEFAULT_CONFIG chains", () => {
     const primary = primaryRpc(DEFAULT_CONFIG.chains.polkadot!.rpc);
-    expect(primary).toBe("wss://polkadot.ibp.network");
+    expect(primary).toBe("wss://polkadot-rpc.n.dwellir.com");
   });
 
   test("BUILTIN_CHAIN_NAMES matches DEFAULT_CONFIG keys", () => {
@@ -59,21 +59,18 @@ describe("DEFAULT_CONFIG", () => {
       "polkadot-collectives",
       "polkadot-coretime",
       "polkadot-people",
+      "polkadot-bulletin",
     ];
     for (const name of expected) {
       expect(BUILTIN_CHAIN_NAMES.has(name)).toBe(true);
     }
   });
 
+  // Paseo only runs Asset Hub (1000), People (1004) and Bulletin (1010) as
+  // system parachains; collectives/bridge-hub/coretime are not registered on
+  // the relay.
   test("includes all Paseo system parachains", () => {
-    const expected = [
-      "paseo",
-      "paseo-asset-hub",
-      "paseo-bridge-hub",
-      "paseo-collectives",
-      "paseo-coretime",
-      "paseo-people",
-    ];
+    const expected = ["paseo", "paseo-asset-hub", "paseo-people", "paseo-bulletin"];
     for (const name of expected) {
       expect(BUILTIN_CHAIN_NAMES.has(name)).toBe(true);
     }
@@ -94,9 +91,11 @@ describe("DEFAULT_CONFIG", () => {
     }
   });
 
-  test("relay chains use IBP as primary endpoint", () => {
-    expect(primaryRpc(DEFAULT_CONFIG.chains.polkadot!.rpc)).toContain("ibp.network");
-    expect(primaryRpc(DEFAULT_CONFIG.chains.paseo!.rpc)).toContain("ibp.network");
+  // IBP (ibp.network / dotters.network) was the primary for both relays until
+  // its DNS was decommissioned; Dwellir is the replacement primary.
+  test("relay chains use an independent provider as primary endpoint", () => {
+    expect(primaryRpc(DEFAULT_CONFIG.chains.polkadot!.rpc)).toContain("dwellir.com");
+    expect(primaryRpc(DEFAULT_CONFIG.chains.paseo!.rpc)).toContain("dwellir.com");
   });
 
   test("polkadot relay keeps rpc.polkadot.io as last fallback", () => {

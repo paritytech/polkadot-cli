@@ -45,12 +45,11 @@ describe("dot chain", () => {
     expect(stdout).toContain("polkadot-collectives");
     expect(stdout).toContain("polkadot-coretime");
     expect(stdout).toContain("polkadot-people");
+    expect(stdout).toContain("polkadot-bulletin");
     // Paseo system parachains
     expect(stdout).toContain("paseo-asset-hub");
-    expect(stdout).toContain("paseo-bridge-hub");
-    expect(stdout).toContain("paseo-collectives");
-    expect(stdout).toContain("paseo-coretime");
     expect(stdout).toContain("paseo-people");
+    expect(stdout).toContain("paseo-bulletin");
   });
 
   test("list with multiple chains shows all", async () => {
@@ -99,7 +98,7 @@ describe("dot chain", () => {
     const { stdout, exitCode } = await runCli(["chain", "list", "-v"]);
     expect(exitCode).toBe(0);
     // polkadot should show primary + fallback RPCs
-    expect(stdout).toContain("polkadot.ibp.network");
+    expect(stdout).toContain("polkadot.gatotech.network");
     expect(stdout).toContain("polkadot-rpc.n.dwellir.com");
     expect(stdout).toContain("rpc.polkadot.io");
   });
@@ -487,11 +486,10 @@ describe("dot chain", () => {
       "polkadot-collectives",
       "polkadot-coretime",
       "polkadot-people",
+      "polkadot-bulletin",
       "paseo-asset-hub",
-      "paseo-bridge-hub",
-      "paseo-collectives",
-      "paseo-coretime",
       "paseo-people",
+      "paseo-bulletin",
     ];
     for (const name of parachains) {
       const chain = parsed.chains.find((c: any) => c.name === name);
