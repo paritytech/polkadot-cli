@@ -59,16 +59,18 @@ describe("DEFAULT_CONFIG", () => {
       "polkadot-collectives",
       "polkadot-coretime",
       "polkadot-people",
+      "polkadot-bulletin",
     ];
     for (const name of expected) {
       expect(BUILTIN_CHAIN_NAMES.has(name)).toBe(true);
     }
   });
 
-  // Paseo only runs Asset Hub (1000) and People (1004) as system parachains;
-  // collectives/bridge-hub/coretime are not registered on the relay.
+  // Paseo only runs Asset Hub (1000), People (1004) and Bulletin (1010) as
+  // system parachains; collectives/bridge-hub/coretime are not registered on
+  // the relay.
   test("includes all Paseo system parachains", () => {
-    const expected = ["paseo", "paseo-asset-hub", "paseo-people"];
+    const expected = ["paseo", "paseo-asset-hub", "paseo-people", "paseo-bulletin"];
     for (const name of expected) {
       expect(BUILTIN_CHAIN_NAMES.has(name)).toBe(true);
     }

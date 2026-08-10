@@ -147,8 +147,10 @@ describe("loadConfig merge behavior", () => {
       ["polkadot-collectives", "polkadot", 1001],
       ["polkadot-coretime", "polkadot", 1005],
       ["polkadot-people", "polkadot", 1004],
+      ["polkadot-bulletin", "polkadot", 1010],
       ["paseo-asset-hub", "paseo", 1000],
       ["paseo-people", "paseo", 1004],
+      ["paseo-bulletin", "paseo", 1010],
     ] as const;
     for (const [name, relay, parachainId] of parachains) {
       const chain = DEFAULT_CONFIG.chains[name];

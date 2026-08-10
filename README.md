@@ -45,9 +45,11 @@ Ships with Polkadot and all system parachains preconfigured with multiple fallba
 | | `polkadot-collectives` |
 | | `polkadot-coretime` |
 | | `polkadot-people` |
+| | `polkadot-bulletin` |
 | Paseo (testnet) | `paseo` (relay) |
 | | `paseo-asset-hub` |
 | | `paseo-people` |
+| | `paseo-bulletin` |
 
 Each chain ships with multiple RPC endpoints from decentralized infrastructure providers (Parity, Dwellir, Gatotech, LuckyFriday, Stakeworld, and others). The CLI automatically falls back to the next endpoint if the primary is unreachable.
 

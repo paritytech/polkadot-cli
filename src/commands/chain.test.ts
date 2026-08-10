@@ -45,9 +45,11 @@ describe("dot chain", () => {
     expect(stdout).toContain("polkadot-collectives");
     expect(stdout).toContain("polkadot-coretime");
     expect(stdout).toContain("polkadot-people");
+    expect(stdout).toContain("polkadot-bulletin");
     // Paseo system parachains
     expect(stdout).toContain("paseo-asset-hub");
     expect(stdout).toContain("paseo-people");
+    expect(stdout).toContain("paseo-bulletin");
   });
 
   test("list with multiple chains shows all", async () => {
@@ -484,8 +486,10 @@ describe("dot chain", () => {
       "polkadot-collectives",
       "polkadot-coretime",
       "polkadot-people",
+      "polkadot-bulletin",
       "paseo-asset-hub",
       "paseo-people",
+      "paseo-bulletin",
     ];
     for (const name of parachains) {
       const chain = parsed.chains.find((c: any) => c.name === name);

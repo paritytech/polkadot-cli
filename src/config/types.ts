@@ -25,6 +25,7 @@ export const DEFAULT_CONFIG: Config = {
         "wss://polkadot-rpc.publicnode.com",
         "wss://polkadot.api.onfinality.io/public-ws",
         "wss://rpc.interweb-it.com/polkadot",
+        "wss://polkadot.rotko.net",
         // Parity's own endpoint stays the last-resort fallback so the default
         // path favours independent providers.
         "wss://rpc.polkadot.io",
@@ -39,6 +40,8 @@ export const DEFAULT_CONFIG: Config = {
         "wss://rpc-asset-hub-polkadot.helixstreet.io",
         "wss://rpc-asset-hub-polkadot.stakeworld.io",
         "wss://statemint.api.onfinality.io/public-ws",
+        "wss://asset-hub-polkadot.rotko.net",
+        "wss://sys.turboflakes.io/asset-hub-polkadot",
       ],
       relay: "polkadot",
       parachainId: 1000,
@@ -50,9 +53,19 @@ export const DEFAULT_CONFIG: Config = {
         "wss://rpc-bridge-hub-polkadot.luckyfriday.io",
         "wss://rpc-bridge-hub-polkadot.stakeworld.io",
         "wss://bridgehub-polkadot.api.onfinality.io/public-ws",
+        "wss://bridge-hub-polkadot.rotko.net",
       ],
       relay: "polkadot",
       parachainId: 1002,
+    },
+    "polkadot-bulletin": {
+      rpc: [
+        "wss://bulletin-rpc.polkadot.io",
+        "wss://rpc-bulletin.luckyfriday.io",
+        "wss://rpc.interweb-it.com/bulletin-polkadot",
+      ],
+      relay: "polkadot",
+      parachainId: 1010,
     },
     "polkadot-collectives": {
       rpc: [
@@ -61,6 +74,7 @@ export const DEFAULT_CONFIG: Config = {
         "wss://rpc-collectives-polkadot.luckyfriday.io",
         "wss://rpc-collectives-polkadot.stakeworld.io",
         "wss://collectives.api.onfinality.io/public-ws",
+        "wss://collectives-polkadot.rotko.net",
       ],
       relay: "polkadot",
       parachainId: 1001,
@@ -72,6 +86,7 @@ export const DEFAULT_CONFIG: Config = {
         "wss://rpc-coretime-polkadot.luckyfriday.io",
         "wss://rpc-coretime-polkadot.stakeworld.io",
         "wss://coretime-polkadot.api.onfinality.io/public-ws",
+        "wss://coretime-polkadot.rotko.net",
       ],
       relay: "polkadot",
       parachainId: 1005,
@@ -84,6 +99,8 @@ export const DEFAULT_CONFIG: Config = {
         "wss://rpc-people-polkadot.helixstreet.io",
         "wss://rpc-people-polkadot.stakeworld.io",
         "wss://people-polkadot.api.onfinality.io/public-ws",
+        "wss://people-polkadot.rotko.net",
+        "wss://sys.turboflakes.io/people-polkadot",
       ],
       relay: "polkadot",
       parachainId: 1004,
@@ -100,6 +117,17 @@ export const DEFAULT_CONFIG: Config = {
       rpc: ["wss://asset-hub-paseo-rpc.n.dwellir.com", "wss://sys.turboflakes.io/asset-hub-paseo"],
       relay: "paseo",
       parachainId: 1000,
+    },
+    "paseo-bulletin": {
+      // Parity does not currently serve a Paseo Bulletin endpoint
+      // (paseo-bulletin-rpc.polkadot.io does not accept connections).
+      rpc: [
+        "wss://bullet.sik.rocks",
+        "wss://bulletin-paseo.tservices.es:8443",
+        "wss://bullet.tunastaking.eu",
+      ],
+      relay: "paseo",
+      parachainId: 1010,
     },
     "paseo-people": {
       rpc: [
