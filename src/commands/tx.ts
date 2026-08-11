@@ -1771,6 +1771,26 @@ function buildGeneralTx(
   return total;
 }
 
+// A bare (v5) extrinsic: `0x05 | call_data`, with no transaction extensions at
+// all. This is the format for calls the runtime authorizes by itself rather
+// than from extension data — `Revive.eth_transact`, whose origin comes from the
+// secp256k1 signature inside its payload. pallet-revive rewrites such an
+// extrinsic during `check()` and substitutes its own extension, so any
+// extensions we attached would be discarded anyway; attaching them is not
+// merely redundant but actively breaks on runtimes whose extension set has
+// shifted (asset-hub-next spec 2000035 panics in validate_transaction).
+function buildBareTx(callData: Uint8Array): Uint8Array {
+  const BARE_EXTRINSIC_V5 = 0x05;
+  const payloadLen = 1 + callData.length;
+  const lengthPrefix = scaleCompact.enc(payloadLen);
+
+  const total = new Uint8Array(lengthPrefix.length + payloadLen);
+  total.set(lengthPrefix, 0);
+  total[lengthPrefix.length] = BARE_EXTRINSIC_V5;
+  total.set(callData, lengthPrefix.length + 1);
+  return total;
+}
+
 // --- Progressive transaction tracking ---
 
 type WatchResult = TxFinalized | (TxBestBlocksState & { found: true }) | TxBroadcasted;
@@ -1887,6 +1907,7 @@ function watchTransactionJson(
 
 export {
   autoDefaultForType,
+  buildBareTx,
   buildCustomSignedExtensions,
   buildGeneralTx,
   decodeCallFallback,

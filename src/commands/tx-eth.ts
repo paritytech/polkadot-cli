@@ -28,7 +28,7 @@ import {
 } from "../core/output.ts";
 import { CliError } from "../utils/errors.ts";
 import {
-  buildGeneralTx,
+  buildBareTx,
   formatDispatchError,
   formatEventValue,
   parseCallArgs,
@@ -328,10 +328,10 @@ export async function handleEthereumTx(
     const callData = await parseCallArgs(meta, "Revive", "eth_transact", [payload]);
     const tx = unsafeApi.tx.Revive.eth_transact(callData);
     const callDataBytes = await tx.getEncodedData();
-    const generalTx = buildGeneralTx(meta, callDataBytes, {});
+    const bareTx = buildBareTx(callDataBytes);
 
     const observable = clientHandle.client.submitAndWatch(
-      generalTx,
+      bareTx,
       opts.at,
     ) as import("rxjs").Observable<TxEvent>;
 
