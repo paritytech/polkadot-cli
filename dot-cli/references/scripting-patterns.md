@@ -385,6 +385,36 @@ Notes:
 - `--value <wei>` sends value with the call (18 EVM decimals; on a 10-decimals chain the wei→planck ratio is 10^8).
 - The nonce for rapid-fire sequencing is the fallback account's `System.Account` nonce (`--nonce` overrides).
 
+### Deploy a contract, then configure it as its owner
+
+Deployment goes through the same identity, so the constructor's `msg.sender` — and therefore `owner()` — is the eth address you hold. Capture the address from the `Revive.Instantiated` event and keep scripting against it.
+
+```bash
+CHAIN=preview-asset-hub
+solc --optimize --bin -o out --overwrite Greeter.sol
+
+# Deploy. @file avoids putting kilobytes of bytecode on the command line.
+# --wait finalized matters: reads and dry-runs resolve against the finalized
+# block by default, so a contract that only exists in a best block is still
+# invisible to the next command.
+ADDR=$(dot $CHAIN.tx.Revive.instantiate_with_code @out/Greeter.bin \
+  'constructor(string)' 'hello' --from alice-eth --wait finalized --json \
+  | jq -rs 'map(select(.contract)) | last | .contract')
+
+[ "$ADDR" == "null" ] && { echo "deploy failed"; exit 1; }
+echo "deployed at $ADDR"
+
+# Configure it — owner-only calls succeed because we deployed as this identity.
+dot $CHAIN.tx.Revive.call "$ADDR" 'setGreeting(string)' 'configured' --from alice-eth --wait finalized
+```
+
+Notes:
+
+- `--json` emits NDJSON and several lines carry no `contract` (the `broadcasted` line, and an interim block line before events are decoded), hence `map(select(.contract)) | last`.
+- Budget for **two** costs: the code-upload deposit (`Revive.CodeUploadDepositReserve`, refunded when the code is removed) and the per-contract storage deposit. Both are held on the fallback account, on top of the tx fee.
+- Re-deploying identical bytecode reuses the on-chain code blob (`Revive.CodeInfoOf` refcount goes up) and only charges the storage deposit.
+- `--dry-run` first if the constructor can revert: it decodes the revert and predicts the CREATE address without spending anything.
+
 ## Common Gotchas
 
 1. **`undefined` is not JSON.** Always check before piping to `jq`.

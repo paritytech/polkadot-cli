@@ -23,7 +23,7 @@ A command-line tool for interacting with Polkadot-ecosystem chains. Manage chain
 - ✅ File-based commands — run any command from a YAML/JSON file with variable substitution
 - ✅ Sovereign accounts — store a parachain (child / sibling) or pallet (Treasury, Bounties, NominationPools, …) sovereign as a named watch-only account in one command
 - ✅ Unsigned/authorized transactions — submit governance-authorized calls without a signer (`--unsigned`)
-- ✅ Ethereum identities & contract calls — every mnemonic account has a derived MetaMask-compatible identity (`--from alice-eth` = Alith), or store a raw key with `--scheme ethereum`; `dot <chain>.tx.Revive.call` builds calldata cast-style from an ABI signature and submits an EIP-1559 tx via pallet-revive's `eth_transact`, no eth-rpc sidecar
+- ✅ Ethereum identities & contract calls — every mnemonic account has a derived MetaMask-compatible identity (`--from alice-eth` = Alith), or store a raw key with `--scheme ethereum`; `dot <chain>.tx.Revive.call` builds calldata cast-style from an ABI signature and `dot <chain>.tx.Revive.instantiate_with_code` deploys a contract, both as EIP-1559 txs via pallet-revive's `eth_transact` — no eth-rpc sidecar
 - ✅ Non-native fee payment — pay tx fees in any asset the chain accepts via `--asset` (asset-hub-style chains)
 - ✅ Message signing — sign arbitrary bytes with account keypairs for use as `MultiSignature` arguments
 - ✅ Bandersnatch member keys — derive Ring VRF member keys from mnemonics for on-chain member sets
@@ -2069,9 +2069,45 @@ dot preview-asset-hub.tx.Revive.call 0xf209…899B 'available(string)' myname123
 
 Arguments are `<dest-h160>` followed by either raw `0x` calldata or a `'signature(types)'` with its arguments (`uint*`/`int*` as integers, `bool` as `true`/`false`, `address`/`bytes*` as hex, `string` verbatim, arrays/tuples as JSON). Chain id, nonce, and gas are read from the chain; `--nonce` overrides the nonce. `--value` is in wei.
 
-A failed dry-run prints the decoded Solidity revert (`Error(string)`/`Panic(uint256)`) or the raw revert data. `--tip`, `--mortality`, `--asset`, and `--ext` do not apply and are rejected; targets other than `Revive.call` error with guidance, since a secp256k1 key cannot sign substrate extrinsics.
+A failed dry-run prints the decoded Solidity revert (`Error(string)`/`Panic(uint256)`) or the raw revert data. `--tip`, `--mortality`, `--asset`, and `--ext` do not apply and are rejected; targets other than `Revive.call` and `Revive.instantiate_with_code` error with guidance, since a secp256k1 key cannot sign substrate extrinsics.
 
 The identity's fees are withdrawn from its fallback account (fund it first — see [Ethereum identities](#ethereum-identities-secp256k1)). `DOT_DRY_RUN=1` and `--dry-run`/`--no-dry-run` behave exactly as for substrate transactions.
+
+### Deploying a contract
+
+`dot <chain>.tx.Revive.instantiate_with_code` deploys with the same identity and transport — an EIP-1559 **creation** transaction (empty `to`, init code as data) wrapped in `Revive.eth_transact`. The deployer is the eth address, so the constructor sees it as `msg.sender` and `owner()` lands on the key you hold.
+
+```bash
+# Compile with solc (revive chains run EVM bytecode natively — code_type: Evm)
+solc --optimize --bin -o out --overwrite Greeter.sol
+
+# Deploy — @file reads the hex, so the bytecode never has to fit on the command line
+dot preview-asset-hub.tx.Revive.instantiate_with_code @out/Greeter.bin \
+  'constructor(string)' 'hello previewnet' --from alice-eth
+```
+
+```text
+  Chain:  preview-asset-hub (eth chain id 420420417)
+  From:   alice-eth (0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac)
+  Deploy: 1777 bytes of init code (CREATE)
+  Contract: 0x3ed62137c5DB927cb137c26455969116BF0c23Cb
+  Method: constructor(string)
+  Nonce:  2
+  Gas:    787214 @ 1000000000000 wei
+  Status: ok
+  Events:
+    Revive.Instantiated { deployer: 0xf24ff3a9…, contract: 0x3ed62137… }
+```
+
+Then call it as the deployer/owner:
+
+```bash
+dot preview-asset-hub.tx.Revive.call 0x3ed62137… 'setGreeting(string)' 'hi' --from alice-eth
+```
+
+The bytecode argument is either `0x`-hex inline or `@<path>` to a file of hex — with or without the `0x` prefix and trailing whitespace, so `solc --bin` and foundry `*.bin` artifacts work as-is. Constructor arguments need an explicit `'constructor(types)'` signature (a *function* signature is rejected: it would prepend a selector and produce an undeployable blob); they are ABI-encoded and appended to the init code, exactly as `cast create` does. `--value <wei>` funds a payable constructor.
+
+The deployed address is reported from the chain's `Revive.Instantiated` event. A `--dry-run` cannot observe that event, so it prints the address predicted from the sender and nonce (`keccak256(rlp([sender, nonce]))[12..]`, the standard CREATE rule pallet-revive's EVM layer follows) along with gas, storage deposit, and the size of the runtime code the constructor would return.
 
 ## File-Based Commands
 

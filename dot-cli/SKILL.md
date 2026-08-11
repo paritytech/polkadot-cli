@@ -552,7 +552,17 @@ dot preview-asset-hub.tx.Revive.call 0x7099…79C8 --value 1000000000000000000 -
 # --dry-run prints gas, storage deposit, max fee, decoded revert/return data
 ```
 
-Arg conventions for `'sig(types)'` args: ints as integers, `bool` as true/false, `address`/`bytes*` as 0x-hex, `string` verbatim, arrays/tuples as JSON. `--tip`/`--mortality`/`--asset`/`--ext` are rejected; ethereum accounts cannot sign substrate extrinsics (any other `tx.<Pallet>.<call>` target errors with guidance).
+Arg conventions for `'sig(types)'` args: ints as integers, `bool` as true/false, `address`/`bytes*` as 0x-hex, `string` verbatim, arrays/tuples as JSON. `--tip`/`--mortality`/`--asset`/`--ext` are rejected; ethereum accounts cannot sign substrate extrinsics (any `tx.<Pallet>.<call>` target other than `Revive.call`/`Revive.instantiate_with_code` errors with guidance).
+
+**Deploying a contract** — `tx.Revive.instantiate_with_code` sends an EIP-1559 *creation* tx (empty `to`), so the constructor's `msg.sender` is the eth address:
+
+```bash
+solc --optimize --bin -o out --overwrite Greeter.sol   # revive chains run EVM bytecode natively (code_type: Evm)
+dot preview-asset-hub.tx.Revive.instantiate_with_code @out/Greeter.bin 'constructor(string)' 'hello' --from alice-eth
+dot preview-asset-hub.tx.Revive.instantiate_with_code 0x6080… --from dotns-admin   # inline hex, no ctor args
+```
+
+Bytecode is `0x`-hex inline or `@<path>` (file may omit `0x` and end with a newline — `solc --bin`/foundry `*.bin` work as-is). Constructor args require a literal `'constructor(types)'` signature — a function signature is rejected, since it would prepend a selector and produce an undeployable blob. `--value <wei>` funds a payable constructor. The address comes from the `Revive.Instantiated` event; `--dry-run` instead predicts it from sender+nonce (standard CREATE rule) and reports gas, storage deposit, and the runtime-code size.
 
 ### Sovereign Accounts (Parachain & Pallet)
 
@@ -743,7 +753,7 @@ dot verifiable verify --proof 0x<proof> --context dotns \
 | `--ext <json>` | tx | Custom signed extension values |
 | `--at <block>` | tx, query, apis | Block hash, `"best"`, or `"finalized"` to read/validate against. Defaults to finalized. Tx submission rejects `"best"`. |
 | `--scheme <s>` | account add/create | `sr25519` (default) or `ethereum` (secp256k1 key) |
-| `--value <wei>` | tx (ethereum `--from` only) | Value sent with a `Revive.call` contract call, in wei (18 EVM decimals) |
+| `--value <wei>` | tx (ethereum `--from` only) | Value sent with a `Revive.call` contract call or `Revive.instantiate_with_code` deployment, in wei (18 EVM decimals) |
 
 ## Common Errors
 
