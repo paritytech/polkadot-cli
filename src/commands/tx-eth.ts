@@ -5,10 +5,13 @@ import { resolveEthereumPrivateKey, toSs58 } from "../core/accounts.ts";
 import { type ClientHandle, createChainClient } from "../core/client.ts";
 import {
   decodeRevertData,
+  encodeDeploymentData,
   encodeFunctionCall,
   ethereumAddressFromPrivateKey,
   limbsToU256,
+  looksLikeConstructorSignature,
   looksLikeFunctionSignature,
+  predictCreateAddress,
   signEthereumTransaction,
   u256ToLimbs,
 } from "../core/ethereum.ts";
@@ -58,9 +61,63 @@ export interface EthereumTxOptions {
 }
 
 interface ParsedEthereumCall {
-  dest: string; // EIP-55 H160
-  data: string; // 0x calldata
+  dest: string | null; // EIP-55 H160, or null for a contract deployment (CREATE)
+  data: string; // 0x calldata, or init code when `dest` is null
   signature?: string; // human ABI signature, when used
+}
+
+const DEPLOY_USAGE =
+  "Usage: dot <chain>.tx.Revive.instantiate_with_code <0xcode|@file> ['constructor(types)' args...] [--value <wei>] --from <ethereum-account>";
+
+// Deploy bytecode is far too long to paste, so the code argument also accepts
+// `@<path>` — a file of hex, with or without the 0x prefix and trailing
+// whitespace, which is exactly what `solc --bin` and foundry's `*.bin` emit.
+async function readBytecodeArg(raw: string): Promise<string> {
+  if (!raw.startsWith("@")) {
+    if (!/^0x([0-9a-fA-F]{2})*$/.test(raw)) {
+      throw new CliError(
+        `"${raw}" is neither 0x-hex bytecode nor an @file reference.\n${DEPLOY_USAGE}`,
+      );
+    }
+    return raw;
+  }
+  const path = raw.slice(1);
+  let contents: string;
+  try {
+    contents = await Bun.file(path).text();
+  } catch {
+    throw new CliError(`Cannot read bytecode file "${path}".`);
+  }
+  const hex = contents.trim().replace(/\s+/g, "");
+  const body = hex.startsWith("0x") || hex.startsWith("0X") ? hex.slice(2) : hex;
+  if (!/^([0-9a-fA-F]{2})*$/.test(body) || body.length === 0) {
+    throw new CliError(
+      `File "${path}" does not contain contract bytecode (expected an even number of hex characters).`,
+    );
+  }
+  return `0x${body}`;
+}
+
+// Parse the positional args of an ethereum-signed contract deployment:
+//   <0xcode|@file> ['constructor(types)' args...]
+async function parseEthereumDeployArgs(args: string[]): Promise<ParsedEthereumCall> {
+  const [codeArg, ...rest] = args;
+  if (!codeArg) {
+    throw new CliError(`Contract bytecode is required.\n${DEPLOY_USAGE}`);
+  }
+  const bytecode = await readBytecodeArg(codeArg);
+
+  const [first, ...ctorArgs] = rest;
+  if (first !== undefined && !looksLikeConstructorSignature(first)) {
+    throw new CliError(
+      `"${first}" is not a constructor signature like 'constructor(string,uint256)'.\n${DEPLOY_USAGE}`,
+    );
+  }
+  return {
+    dest: null,
+    data: await encodeDeploymentData(bytecode, first, ctorArgs),
+    signature: first,
+  };
 }
 
 // Parse the positional args of an ethereum-signed contract call:
@@ -123,7 +180,7 @@ function parseValueOption(raw: string | undefined): bigint {
 // U256 fields are 4 little-endian u64 limbs.
 function buildGenericTransaction(params: {
   from: string;
-  to: string;
+  to: string | null;
   data: string;
   value: bigint;
   nonce: bigint;
@@ -149,6 +206,20 @@ function buildGenericTransaction(params: {
   };
 }
 
+function byteLength(hex: string): number {
+  return Math.max(0, (hex.length - 2) / 2);
+}
+
+// Deploy init code runs to kilobytes of hex and would bury the rest of the
+// report. Only deployments abbreviate — a call's calldata prints verbatim, as
+// it always has, and `--json` always carries the full value either way.
+const HEX_ABBREVIATE_ABOVE = 128;
+
+function abbreviateHex(hex: string): string {
+  if (hex.length <= HEX_ABBREVIATE_ABOVE) return hex;
+  return `${hex.slice(0, 66)}…${hex.slice(-8)} (${byteLength(hex)} bytes)`;
+}
+
 // Runtime-API results carry byte payloads either as papi Binary or as plain
 // Uint8Array depending on the codec — normalize to 0x-hex.
 function toHexData(value: unknown): string {
@@ -159,6 +230,18 @@ function toHexData(value: unknown): string {
     return Binary.toHex(value);
   }
   return "0x";
+}
+
+// The authoritative deployed address: pallet-revive reports it as
+// `Revive.Instantiated { deployer, contract }`.
+function deployedContractFromEvents(
+  events: readonly { type?: string; value?: { type?: string; value?: unknown } }[] | undefined,
+): string | undefined {
+  const instantiated = events?.find((e) => e.type === "Revive" && e.value?.type === "Instantiated");
+  const contract = (instantiated?.value?.value as { contract?: unknown } | undefined)?.contract;
+  if (contract === undefined) return undefined;
+  const hex = toHexData(contract);
+  return isH160Hex(hex) ? toEip55(h160FromHex(hex)) : undefined;
 }
 
 // Render the Err side of ReviveApi.eth_transact — `Data(Vec<u8>)` carries the
@@ -192,10 +275,18 @@ export async function handleEthereumTx(
       `Raw call hex is a substrate call and cannot be signed by ethereum account "${accountName}". Use dot <chain>.tx.Revive.call <dest> <data> --from ${accountName}.`,
     );
   }
-  if (target.toLowerCase() !== "revive.call") {
+  // Two eth-transactable targets: a call (`to` = contract) and a deployment
+  // (`to` = null, data = init code). Everything else is a substrate extrinsic a
+  // secp256k1 key cannot sign.
+  const normalizedTarget = target.toLowerCase();
+  const isDeploy =
+    normalizedTarget === "revive.instantiate_with_code" ||
+    normalizedTarget === "revive.eth_instantiate_with_code";
+  if (normalizedTarget !== "revive.call" && !isDeploy) {
     throw new CliError(
       `Ethereum account "${accountName}" holds a secp256k1 key and cannot sign substrate extrinsics.\n` +
-        `It can only submit contract calls via: dot <chain>.tx.Revive.call <dest> [data] --from ${accountName}\n` +
+        `It can call a contract:   dot <chain>.tx.Revive.call <dest> [data] --from ${accountName}\n` +
+        `or deploy one:            dot <chain>.tx.Revive.instantiate_with_code <0xcode|@file> --from ${accountName}\n` +
         `(got: ${target})`,
     );
   }
@@ -210,7 +301,7 @@ export async function handleEthereumTx(
     }
   }
 
-  const call = await parseEthereumCallArgs(args);
+  const call = isDeploy ? await parseEthereumDeployArgs(args) : await parseEthereumCallArgs(args);
   const value = parseValueOption(opts.value);
   const nonceOverride = parseNonceOption(opts.nonce);
   const waitLevel = parseWaitLevel(opts.wait);
@@ -280,6 +371,11 @@ export async function handleEthereumTx(
     const returnData = toHexData(dryRun.value.data);
     const maxFeeWei = gas * gasPrice;
 
+    // A CREATE address is a pure function of sender and nonce, so it is known
+    // before submission. On the real submit the `Revive.Instantiated` event is
+    // authoritative and replaces this.
+    const predictedContract = isDeploy ? await predictCreateAddress(fromH160, nonce) : undefined;
+
     if (opts.dryRun) {
       if (isJsonOutput(opts)) {
         console.log(
@@ -287,6 +383,8 @@ export async function handleEthereumTx(
             chain: chainName,
             from: { name: accountName, address: fromH160, ss58: fallbackSs58 },
             to: call.dest,
+            deploy: isDeploy || undefined,
+            contract: predictedContract,
             signature: call.signature,
             data: call.data,
             value: String(value),
@@ -303,15 +401,32 @@ export async function handleEthereumTx(
       }
       console.log(`  ${BOLD}Chain:${RESET}  ${chainName} ${DIM}(eth chain id ${chainId})${RESET}`);
       console.log(`  ${BOLD}From:${RESET}   ${accountName} (${fromH160})`);
-      console.log(`  ${BOLD}To:${RESET}     ${call.dest}`);
+      if (isDeploy) {
+        console.log(
+          `  ${BOLD}Deploy:${RESET} ${byteLength(call.data)} bytes of init code ${DIM}(CREATE)${RESET}`,
+        );
+        console.log(
+          `  ${BOLD}Contract:${RESET} ${predictedContract} ${DIM}(predicted from nonce ${nonce})${RESET}`,
+        );
+      } else {
+        console.log(`  ${BOLD}To:${RESET}     ${call.dest}`);
+      }
       if (call.signature) console.log(`  ${BOLD}Method:${RESET} ${CYAN}${call.signature}${RESET}`);
-      console.log(`  ${BOLD}Data:${RESET}   ${call.data}`);
+      console.log(`  ${BOLD}Data:${RESET}   ${isDeploy ? abbreviateHex(call.data) : call.data}`);
       if (value > 0n) console.log(`  ${BOLD}Value:${RESET}  ${value} wei`);
       console.log(`  ${BOLD}Nonce:${RESET}  ${nonce}`);
       console.log(`  ${BOLD}Gas:${RESET}    ${gas} @ ${gasPrice} wei`);
       if (storageDeposit > 0n) console.log(`  ${BOLD}Storage deposit:${RESET} ${storageDeposit}`);
       console.log(`  ${BOLD}Max fee:${RESET} ${maxFeeWei} wei`);
-      if (returnData !== "0x") console.log(`  ${BOLD}Return:${RESET} ${returnData}`);
+      if (returnData !== "0x") {
+        // For a deployment the runtime returns the contract's runtime code —
+        // its size is the useful signal, not kilobytes of hex.
+        console.log(
+          isDeploy
+            ? `  ${BOLD}Code:${RESET}   ${byteLength(returnData)} bytes deployed`
+            : `  ${BOLD}Return:${RESET} ${returnData}`,
+        );
+      }
       return;
     }
 
@@ -354,6 +469,10 @@ export async function handleEthereumTx(
         ethereum: true,
         from: { name: accountName, address: fromH160 },
         to: call.dest,
+        deploy: isDeploy || undefined,
+        contract: isDeploy
+          ? (deployedContractFromEvents(result.events) ?? predictedContract)
+          : undefined,
         blockNumber: result.block.number,
         blockHash,
         txHash: result.txHash,
@@ -379,9 +498,21 @@ export async function handleEthereumTx(
     console.log();
     console.log(`  ${BOLD}Chain:${RESET}  ${chainName} ${DIM}(eth chain id ${chainId})${RESET}`);
     console.log(`  ${BOLD}From:${RESET}   ${accountName} (${fromH160})`);
-    console.log(`  ${BOLD}To:${RESET}     ${call.dest}`);
+    if (isDeploy) {
+      // A broadcast-only result carries no events yet; the predicted CREATE
+      // address is still correct for the nonce that was signed.
+      const deployed =
+        deployedContractFromEvents("events" in result ? result.events : undefined) ??
+        predictedContract;
+      console.log(
+        `  ${BOLD}Deploy:${RESET} ${byteLength(call.data)} bytes of init code ${DIM}(CREATE)${RESET}`,
+      );
+      console.log(`  ${BOLD}Contract:${RESET} ${GREEN}${deployed}${RESET}`);
+    } else {
+      console.log(`  ${BOLD}To:${RESET}     ${call.dest}`);
+    }
     if (call.signature) console.log(`  ${BOLD}Method:${RESET} ${CYAN}${call.signature}${RESET}`);
-    console.log(`  ${BOLD}Data:${RESET}   ${call.data}`);
+    console.log(`  ${BOLD}Data:${RESET}   ${isDeploy ? abbreviateHex(call.data) : call.data}`);
     if (value > 0n) console.log(`  ${BOLD}Value:${RESET}  ${value} wei`);
     console.log(`  ${BOLD}Nonce:${RESET}  ${nonce}`);
     console.log(`  ${BOLD}Gas:${RESET}    ${gas} @ ${gasPrice} wei`);
@@ -439,9 +570,12 @@ export async function handleEthereumTx(
 }
 
 export {
+  abbreviateHex,
   buildGenericTransaction,
+  deployedContractFromEvents,
   formatEthTransactError,
   parseEthereumCallArgs,
+  parseEthereumDeployArgs,
   parseValueOption,
   toHexData,
 };

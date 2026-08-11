@@ -1,16 +1,27 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { StoredAccount } from "../config/accounts-types.ts";
+import { predictCreateAddress } from "../core/ethereum.ts";
 import { runCli } from "./__fixtures__/run-cli.ts";
+import { buildBareTx } from "./tx.ts";
 import {
+  abbreviateHex,
   buildGenericTransaction,
+  deployedContractFromEvents,
   formatEthTransactError,
   handleEthereumTx,
   parseEthereumCallArgs,
+  parseEthereumDeployArgs,
   parseValueOption,
   toHexData,
 } from "./tx-eth.ts";
 
 const DEST = "0x03e9Cb96dF143b2339b75E6A0dB018fC79cE6eB1";
+// Minimal but real solc output shape: deploy bytecode as `solc --bin` emits it
+// (no 0x prefix, trailing newline).
+const CODE = "6080604052348015600e575f5ffd5b50";
 
 describe("parseEthereumCallArgs", () => {
   test("bare transfer: dest only, empty calldata", async () => {
@@ -66,6 +77,77 @@ describe("parseEthereumCallArgs", () => {
     await expect(parseEthereumCallArgs([DEST, "hello"])).rejects.toThrow(
       "neither 0x-hex calldata nor a function signature",
     );
+  });
+});
+
+describe("parseEthereumDeployArgs", () => {
+  test("inline bytecode deploys with no constructor args", async () => {
+    const call = await parseEthereumDeployArgs([`0x${CODE}`]);
+    expect(call.dest).toBe(null); // null `to` is what makes it a CREATE
+    expect(call.data).toBe(`0x${CODE}`);
+    expect(call.signature).toBeUndefined();
+  });
+
+  test("appends ABI-encoded constructor arguments to the init code", async () => {
+    const call = await parseEthereumDeployArgs([`0x${CODE}`, "constructor(string)", "hi"]);
+    expect(call.signature).toBe("constructor(string)");
+    expect(call.data.startsWith(`0x${CODE}`)).toBe(true);
+    // offset, length 2, "hi" right-padded — and no 4-byte selector.
+    expect(call.data.slice(2 + CODE.length)).toBe(
+      "0000000000000000000000000000000000000000000000000000000000000020" +
+        "0000000000000000000000000000000000000000000000000000000000000002" +
+        "6869000000000000000000000000000000000000000000000000000000000000",
+    );
+  });
+
+  test("reads bytecode from an @file, tolerating solc's bare hex and newline", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dot-deploy-"));
+    try {
+      writeFileSync(join(dir, "bare.bin"), `${CODE}\n`);
+      writeFileSync(join(dir, "prefixed.bin"), `0x${CODE}`);
+      for (const name of ["bare.bin", "prefixed.bin"]) {
+        const call = await parseEthereumDeployArgs([`@${join(dir, name)}`]);
+        expect(call.data).toBe(`0x${CODE}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects a missing, unreadable, or non-hex code argument", async () => {
+    await expect(parseEthereumDeployArgs([])).rejects.toThrow("Contract bytecode is required");
+    await expect(parseEthereumDeployArgs(["nope"])).rejects.toThrow(
+      "neither 0x-hex bytecode nor an @file reference",
+    );
+    await expect(parseEthereumDeployArgs(["@/nonexistent/x.bin"])).rejects.toThrow(
+      "Cannot read bytecode file",
+    );
+    const dir = mkdtempSync(join(tmpdir(), "dot-deploy-"));
+    try {
+      writeFileSync(join(dir, "junk.bin"), "not hex at all");
+      await expect(parseEthereumDeployArgs([`@${join(dir, "junk.bin")}`])).rejects.toThrow(
+        "does not contain contract bytecode",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects args that are not a constructor signature", async () => {
+    // A function signature would silently prepend a 4-byte selector to the
+    // init code and produce an undeployable blob.
+    await expect(
+      parseEthereumDeployArgs([`0x${CODE}`, "transfer(address,uint256)", "0x00", "1"]),
+    ).rejects.toThrow("not a constructor signature");
+    await expect(parseEthereumDeployArgs([`0x${CODE}`, "hi"])).rejects.toThrow(
+      "not a constructor signature",
+    );
+  });
+
+  test("rejects an argument count that does not match the constructor", async () => {
+    await expect(
+      parseEthereumDeployArgs([`0x${CODE}`, "constructor(string,uint256)", "hi"]),
+    ).rejects.toThrow("constructor expects 2 argument(s)");
   });
 });
 
@@ -190,6 +272,64 @@ describe("tx-eth helpers (in-process)", () => {
     expect(tx.authorization_list).toEqual([]);
   });
 
+  test("buildGenericTransaction carries a null `to` through for deployments", () => {
+    const tx = buildGenericTransaction({
+      from: "0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac",
+      to: null,
+      data: `0x${CODE}`,
+      value: 0n,
+      nonce: 0n,
+    });
+    expect(tx.to).toBe(null);
+    expect(tx.input.data).toBe(`0x${CODE}`);
+  });
+
+  test("deployedContractFromEvents reads the address out of Revive.Instantiated", () => {
+    const contract = "0xc01ee7f10ea4af4673cfff62710e1d7792aba8f3";
+    const events = [
+      { type: "Balances", value: { type: "Withdraw", value: { amount: 1n } } },
+      {
+        type: "Revive",
+        value: {
+          type: "Instantiated",
+          value: { deployer: {}, contract: { asHex: () => contract } },
+        },
+      },
+    ];
+    expect(deployedContractFromEvents(events)).toBe("0xc01Ee7f10EA4aF4673cFff62710E1D7792aBa8f3");
+    expect(deployedContractFromEvents([])).toBeUndefined();
+    expect(deployedContractFromEvents(undefined)).toBeUndefined();
+  });
+
+  test("predictCreateAddress matches the address previewnet actually assigned", async () => {
+    // Regression vector: the deployment executed in preview-asset-hub block
+    // #422056 as alice-eth (Alith) with nonce 2.
+    expect(await predictCreateAddress("0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac", 2n)).toBe(
+      "0x3ed62137c5DB927cb137c26455969116BF0c23Cb",
+    );
+  });
+
+  test("abbreviateHex keeps calldata verbatim and shortens init code", () => {
+    expect(abbreviateHex("0x42cbb15c")).toBe("0x42cbb15c");
+    const long = `0x${"ab".repeat(600)}`;
+    expect(abbreviateHex(long)).toContain("(600 bytes)");
+    expect(abbreviateHex(long).length).toBeLessThan(100);
+  });
+
+  test("buildBareTx emits `0x05 | call` with a compact length prefix, no extensions", () => {
+    const call = new Uint8Array([0x3d, 0x0a, 0xde, 0xad]);
+    const bare = buildBareTx(call);
+    // 5 payload bytes → single-byte compact prefix (5 << 2).
+    expect(Array.from(bare)).toEqual([5 << 2, 0x05, 0x3d, 0x0a, 0xde, 0xad]);
+
+    // Past 63 payload bytes the prefix grows to two bytes; the body must stay
+    // exactly the version byte plus the call.
+    const big = new Uint8Array(100).fill(0x11);
+    const bareBig = buildBareTx(big);
+    expect(bareBig.length).toBe(2 + 1 + big.length);
+    expect(bareBig[2]).toBe(0x05);
+  });
+
   test("formatEthTransactError decodes revert data and messages", async () => {
     const boom =
       "0x08c379a0" +
@@ -218,10 +358,38 @@ describe("handleEthereumTx pre-connect guards (in-process)", () => {
     ).rejects.toThrow("Raw call hex is a substrate call");
   });
 
-  test("rejects non-Revive.call targets", async () => {
+  test("rejects non-Revive targets, pointing at both call and deploy", async () => {
     await expect(
       handleEthereumTx("System.remark", ["0xdead"], "eth-admin", "polkadot", chainConfig, {}),
     ).rejects.toThrow("cannot sign substrate extrinsics");
+    await expect(
+      handleEthereumTx("System.remark", ["0xdead"], "eth-admin", "polkadot", chainConfig, {}),
+    ).rejects.toThrow("instantiate_with_code");
+  });
+
+  test("deploy targets reach the deploy parser, not the call parser", async () => {
+    for (const target of [
+      "Revive.instantiate_with_code",
+      "revive.instantiate_with_code",
+      "Revive.eth_instantiate_with_code",
+    ]) {
+      await expect(
+        handleEthereumTx(target, [], "eth-admin", "polkadot", chainConfig, {}),
+      ).rejects.toThrow("Contract bytecode is required");
+    }
+  });
+
+  test("inapplicable flags are rejected for deploys too", async () => {
+    await expect(
+      handleEthereumTx(
+        "Revive.instantiate_with_code",
+        [`0x${CODE}`],
+        "eth-admin",
+        "polkadot",
+        chainConfig,
+        { tip: "1" },
+      ),
+    ).rejects.toThrow("does not apply to ethereum transactions");
   });
 
   test("rejects inapplicable transaction flags", async () => {
@@ -287,5 +455,34 @@ describe("live dry-run (previewnet)", { timeout: 90_000 }, () => {
     expect(stdout).toContain("getBlockNumber()");
     expect(stdout).toContain("Gas:");
     expect(stdout).toContain("Return: 0x");
+  });
+
+  // The create path prices differently (init code, storage deposit for the code
+  // blob) and is the one place the predicted CREATE address is computed.
+  // @ts-expect-error Bun supports test(label, options, fn) at runtime
+  liveTest("prices a contract deployment and predicts its address", { retry: 2 }, async () => {
+    const { stdout, exitCode } = await runCli(
+      [
+        "preview-asset-hub.tx.Revive.instantiate_with_code",
+        // Deploys an empty contract: constructor stores nothing and returns 0
+        // bytes of runtime code.
+        "0x6080604052348015600e575f5ffd5b5060405f81600e8339f3",
+        "--from",
+        "alice-eth",
+        "--dry-run",
+      ],
+      {
+        noDefaultChain: true,
+        files: {
+          ".polkadot/config.json": JSON.stringify({
+            chains: { "preview-asset-hub": { rpc: "wss://previewnet.substrate.dev/asset-hub" } },
+          }),
+        },
+      },
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("bytes of init code (CREATE)");
+    expect(stdout).toMatch(/Contract: 0x[0-9a-fA-F]{40} \(predicted from nonce \d+\)/);
+    expect(stdout).toContain("Gas:");
   });
 });

@@ -1,5 +1,6 @@
+import type * as AbiConstructorType from "ox/AbiConstructor";
 import type * as AbiFunctionType from "ox/AbiFunction";
-import { h160FromHex } from "./h160.ts";
+import { h160FromHex, toEip55 } from "./h160.ts";
 
 // This module is loaded eagerly on every CLI start (via commands/account.ts),
 // so ALL ox modules are loaded lazily by the functions that need them —
@@ -77,9 +78,9 @@ export async function ethereumAddressFromPrivateKey(privateKey: string): Promise
 export interface EthereumTransactionRequest {
   chainId: number;
   nonce: bigint;
-  to: string; // 0x-prefixed H160
+  to: string | null; // 0x-prefixed H160, or null for a contract deployment
   value: bigint; // wei (18 EVM decimals)
-  data: string; // 0x-prefixed calldata ("0x" for none)
+  data: string; // 0x-prefixed calldata ("0x" for none), or init code when `to` is null
   gas: bigint;
   maxFeePerGas: bigint;
   maxPriorityFeePerGas?: bigint;
@@ -95,7 +96,9 @@ export async function signEthereumTransaction(
   const envelope = TxEnvelopeEip1559.from({
     chainId: request.chainId,
     nonce: request.nonce,
-    to: request.to as `0x${string}`,
+    // `to: null` is what makes this a contract-creation transaction — the RLP
+    // envelope carries an empty `to` field and the init code as `data`.
+    to: request.to as `0x${string}` | null,
     value: request.value,
     data: request.data as `0x${string}`,
     gas: request.gas,
@@ -192,6 +195,64 @@ export async function encodeFunctionCall(
   }
   const values = fn.inputs.map((input, i) => parseAbiArgument(input.type, args[i]!));
   return AbiFunction.encodeData(fn, values as never);
+}
+
+// A human ABI constructor signature: `constructor(string,uint256)`. Solidity
+// reserves the name, so it can never collide with a function signature.
+const CONSTRUCTOR_SIGNATURE_RE = /^constructor\(.*\)$/;
+
+export function looksLikeConstructorSignature(input: string): boolean {
+  return CONSTRUCTOR_SIGNATURE_RE.test(input);
+}
+
+// Build contract-creation init code: the compiler's deploy bytecode with the
+// ABI-encoded constructor arguments appended, exactly as `cast create` does.
+export async function encodeDeploymentData(
+  bytecode: string,
+  signature: string | undefined,
+  args: string[],
+): Promise<`0x${string}`> {
+  if (signature === undefined) {
+    if (args.length > 0) {
+      throw new Error(
+        `Constructor arguments need a signature, e.g. 'constructor(string)' — got ${args.length} bare argument(s).`,
+      );
+    }
+    return bytecode as `0x${string}`;
+  }
+  const AbiConstructor = (await lazyImport(
+    "ox/AbiConstructor",
+  )) as typeof import("ox/AbiConstructor");
+  // As with AbiFunction.from, a runtime (non-literal) string types as the union
+  // of all ABI item kinds — narrow via the runtime `type` tag.
+  const ctor = AbiConstructor.from(signature) as AbiConstructorType.AbiConstructor;
+  if (ctor.type !== "constructor") {
+    throw new Error(`"${signature}" is not a constructor signature.`);
+  }
+  if (ctor.inputs.length !== args.length) {
+    throw new Error(
+      `constructor expects ${ctor.inputs.length} argument(s) (${ctor.inputs
+        .map((i) => i.type)
+        .join(", ")}), got ${args.length}.`,
+    );
+  }
+  const values = ctor.inputs.map((input, i) => parseAbiArgument(input.type, args[i]!));
+  return AbiConstructor.encode(ctor, {
+    bytecode: bytecode as `0x${string}`,
+    args: values as never,
+  });
+}
+
+// The address a CREATE transaction will produce: keccak256(rlp([sender, nonce]))[12..],
+// in EIP-55 form. pallet-revive's EVM compatibility layer follows the same rule,
+// so the address can be shown before the transaction is submitted (a dry-run
+// reports no address of its own).
+export async function predictCreateAddress(from: string, nonce: bigint): Promise<string> {
+  const ContractAddress = (await lazyImport(
+    "ox/ContractAddress",
+  )) as typeof import("ox/ContractAddress");
+  // ox returns the address lowercased; the CLI shows H160s in EIP-55.
+  return toEip55(h160FromHex(ContractAddress.fromCreate({ from: from as `0x${string}`, nonce })));
 }
 
 const ERROR_STRING_SELECTOR = "0x08c379a0"; // Error(string)
