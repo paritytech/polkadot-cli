@@ -36,24 +36,27 @@
     "url": "git+https://github.com/paritytech/polkadot-cli.git"
   },
   "dependencies": {
-    "@noble/hashes": "^2.0.1",
+    "@noble/hashes": "^2.2.0",
     "@polkadot-api/metadata-builders": "^0.14.3",
     "@polkadot-api/substrate-bindings": "^0.20.3",
     "@polkadot-api/substrate-client": "^0.7.0",
     "@polkadot-api/view-builder": "^0.5.3",
     "@polkadot-labs/hdkd": "^0.0.28",
-    "@polkadot-labs/hdkd-helpers": "^0.0.29",
+    "@polkadot-labs/hdkd-helpers": "^0.0.30",
     "@scure/sr25519": "^1.0.0",
     "cac": "^7.0.0",
     "polkadot-api": "^2.1.7",
     "verifiablejs": "1.4.0",
-    "yaml": "^2.8.3"
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.5",
-    "@changesets/cli": "^2.29.4",
+    "@biomejs/biome": "^2.5.1",
+    "@changesets/cli": "^2.31.0",
     "@polkadot-api/metadata-compatibility": "^0.6.3",
-    "@types/bun": "^1.3.9",
+    "@types/bun": "^1.3.14",
     "husky": "^9.1.7"
+  },
+  "overrides": {
+    "ws": ">=8.21.0"
   }
 }
