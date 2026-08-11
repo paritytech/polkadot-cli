@@ -4,6 +4,7 @@ import type { CAC } from "cac";
 import { findAccount, loadAccounts, saveAccounts } from "../config/accounts-store.ts";
 import {
   type AccountKind,
+  type AccountScheme,
   type AccountsFile,
   classifyAccount,
   type EnvSecret,
@@ -757,6 +758,14 @@ async function accountDerive(
     throw new Error(`Cannot derive from "${sourceName}": watch-only, no secret.`);
   }
 
+  // Substrate HD derivation on a secp256k1 key would silently mint an
+  // unrelated sr25519 account from the ethereum private key.
+  if (isEthereumAccount(source)) {
+    throw new Error(
+      `Cannot derive from "${sourceName}": it is an Ethereum (secp256k1) account and does not support substrate derivation paths. Import another key with \`dot account add <name> --scheme ethereum --secret 0x<64-hex>\`.`,
+    );
+  }
+
   if (findAccount(accountsFile, newName)) {
     throw new Error(`Account "${newName}" already exists.`);
   }
@@ -1444,6 +1453,7 @@ interface ExportedAccount {
   name: string;
   publicKey: string;
   derivationPath: string;
+  scheme?: AccountScheme;
   secret?: string | EnvSecret;
   bandersnatch?: Record<string, string>;
 }
@@ -1492,6 +1502,13 @@ async function accountExport(
       publicKey: account.publicKey,
       derivationPath: account.derivationPath,
     };
+
+    // Without the scheme an ethereum secret is indistinguishable from a
+    // 32-byte sr25519 seed on re-import, and the account would come back as a
+    // different (sr25519) identity.
+    if (isEthereumAccount(account)) {
+      entry.scheme = "ethereum";
+    }
 
     if (isWatchOnly(account)) {
       // No secret field for watch-only
@@ -1593,20 +1610,37 @@ async function accountBatchImport(
       derivationPath: entry.derivationPath || "",
     };
 
+    if (entry.scheme === "ethereum") {
+      stored.scheme = "ethereum";
+    }
+
     if (entry.secret === undefined || entry.secret === REDACTED) {
       // Watch-only: no secret, preserve publicKey
     } else if (typeof entry.secret === "object" && "env" in entry.secret) {
       // Env-backed account
       stored.secret = entry.secret;
       if (!stored.publicKey) {
-        stored.publicKey = tryDerivePublicKey(entry.secret.env, stored.derivationPath) ?? "";
+        stored.publicKey =
+          (stored.scheme === "ethereum"
+            ? await tryDeriveEthereumPublicKey(entry.secret.env)
+            : tryDerivePublicKey(entry.secret.env, stored.derivationPath)) ?? "";
       }
     } else if (typeof entry.secret === "string") {
-      // Mnemonic or hex seed — validate and derive publicKey
+      // Literal secret — validate against the entry's scheme and re-derive the
+      // publicKey from it, so a tampered/stale publicKey can never stick.
       stored.secret = entry.secret;
       try {
-        const { publicKey } = importAccount(entry.secret, stored.derivationPath);
-        stored.publicKey = publicKeyToHex(publicKey);
+        if (stored.scheme === "ethereum") {
+          if (!isEthereumPrivateKey(entry.secret)) {
+            throw new Error("not an ethereum private key");
+          }
+          stored.publicKey = publicKeyToHex(
+            h160ToFallbackAccountId(await ethereumAddressFromPrivateKey(entry.secret)),
+          );
+        } else {
+          const { publicKey } = importAccount(entry.secret, stored.derivationPath);
+          stored.publicKey = publicKeyToHex(publicKey);
+        }
       } catch {
         process.stderr.write(
           `${YELLOW}Warning: "${entry.name}" has an invalid secret, importing as watch-only.${RESET}\n`,

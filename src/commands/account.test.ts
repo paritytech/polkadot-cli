@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { StoredAccount } from "../config/accounts-types.ts";
 import {
   bytesToHex,
@@ -2358,6 +2361,105 @@ describe("dot account --scheme ethereum", { timeout: 15_000 }, () => {
     });
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("cannot sign substrate extrinsics");
+  });
+
+  test("derive refuses an ethereum source instead of minting an sr25519 child", async () => {
+    const { stderr, exitCode } = await runCli(
+      ["account", "derive", "eth-admin", "child", "--path", "//x"],
+      { accounts: [ETH_ACCOUNT] },
+    );
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain("does not support substrate derivation paths");
+  });
+
+  test("export carries the scheme so the key is not mistaken for an sr25519 seed", async () => {
+    const { stdout, exitCode } = await runCli(["account", "export", "--include-secrets"], {
+      accounts: [ETH_ACCOUNT],
+    });
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.accounts[0].scheme).toBe("ethereum");
+    expect(parsed.accounts[0].secret).toBe(ETH_KEY);
+  });
+
+  test("export omits scheme for sr25519 accounts", async () => {
+    const { stdout, exitCode } = await runCli(["account", "export"], {
+      accounts: [STORED_ACCOUNT],
+    });
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout).accounts[0].scheme).toBeUndefined();
+  });
+
+  // Round-trip through a DOT_HOME we own, so the resulting accounts.json can
+  // be read back — the store the fixture creates is torn down per invocation.
+  test("export/import round-trip preserves scheme and H160 identity", async () => {
+    const exported = await runCli(["account", "export", "--include-secrets"], {
+      accounts: [ETH_ACCOUNT],
+    });
+    expect(exported.exitCode).toBe(0);
+
+    const dotHome = mkdtempSync(join(tmpdir(), "dot-eth-roundtrip-"));
+    try {
+      const imported = await runCli(["account", "import", "-", "--json"], {
+        stdin: exported.stdout,
+        env: { DOT_HOME: dotHome },
+      });
+      expect(imported.exitCode).toBe(0);
+      expect(JSON.parse(imported.stdout).added).toContain("eth-admin");
+
+      const stored = JSON.parse(readFileSync(join(dotHome, "accounts.json"), "utf-8"));
+      expect(stored.accounts[0].scheme).toBe("ethereum");
+      expect(stored.accounts[0].secret).toBe(ETH_KEY);
+      // The fallback AccountId32, NOT an sr25519 key derived from the secret.
+      expect(stored.accounts[0].publicKey).toBe(ETH_FALLBACK_PUBKEY);
+    } finally {
+      rmSync(dotHome, { recursive: true, force: true });
+    }
+  });
+
+  test("batch import re-derives a blank publicKey with secp256k1, not sr25519", async () => {
+    const importData = JSON.stringify({
+      accounts: [
+        {
+          name: "eth-admin",
+          publicKey: "",
+          derivationPath: "",
+          scheme: "ethereum",
+          secret: ETH_KEY,
+        },
+      ],
+    });
+    const dotHome = mkdtempSync(join(tmpdir(), "dot-eth-import-"));
+    try {
+      const { exitCode } = await runCli(["account", "import", "{{HOME}}/eth.json"], {
+        files: { "eth.json": importData },
+        env: { DOT_HOME: dotHome },
+      });
+      expect(exitCode).toBe(0);
+      const stored = JSON.parse(readFileSync(join(dotHome, "accounts.json"), "utf-8"));
+      expect(stored.accounts[0].publicKey).toBe(ETH_FALLBACK_PUBKEY);
+    } finally {
+      rmSync(dotHome, { recursive: true, force: true });
+    }
+  });
+
+  test("batch import rejects a non-secp256k1 secret on an ethereum entry", async () => {
+    const exported = JSON.stringify({
+      accounts: [
+        {
+          name: "bogus",
+          publicKey: "",
+          derivationPath: "",
+          scheme: "ethereum",
+          secret: TEST_MNEMONIC,
+        },
+      ],
+    });
+    const { stderr, exitCode } = await runCli(["account", "import", "{{HOME}}/eth.json"], {
+      files: { "eth.json": exported },
+    });
+    expect(exitCode).toBe(0);
+    expect(stderr).toContain("invalid secret, importing as watch-only");
   });
 });
 
