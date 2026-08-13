@@ -1386,7 +1386,7 @@ dot apis.Core.version --chain polkadot --help      # --chain flag form (chain st
 
 `api` is an alias for `apis`. Shell completions work at every level: `apis.<Tab>` shows API names, `apis.Core.<Tab>` shows method names.
 
-Runtime API info requires v15 metadata. If `dot <chain>.apis` shows 0 APIs, the CLI will suggest updating your cached metadata. Run `dot chain update` (or `dot chain update <chain>`, or `dot chain update --all` for all chains) to fetch the latest version.
+Runtime API info requires v15+ metadata (the CLI negotiates the highest version the chain supports, currently up to v16). If `dot <chain>.apis` shows 0 APIs, the CLI will suggest updating your cached metadata. Run `dot chain update` (or `dot chain update <chain>`, or `dot chain update --all` for all chains) to fetch the latest version.
 
 #### Argument formats
 
@@ -2831,6 +2831,8 @@ Config and metadata caches live in `~/.polkadot/` by default:
         ├── metadata.bin              # cached SCALE-encoded metadata
         └── metadata.fingerprint.json # runtime fingerprint (specVersion, codeHash, …) for stale-metadata detection
 ```
+
+Metadata is fetched at the highest version both the chain and the CLI support (negotiated via `Metadata_metadata_versions`, currently up to v16; chains without that runtime API fall back to v14). The fingerprint records which version the cache holds — a cache below the negotiated version, or one written by an older CLI without version info, is refreshed automatically on the next connected command.
 
 ### Local workspaces — `dot init`
 

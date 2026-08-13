@@ -932,7 +932,9 @@ describe("dot chain", () => {
   });
 
   test("info on uncached chain shows `not cached` hint", async () => {
-    const { stdout, exitCode } = await runCli(["chain", "info", "polkadot"]);
+    const { stdout, exitCode } = await runCli(["chain", "info", "polkadot"], {
+      noMetadataFingerprint: true,
+    });
     expect(exitCode).toBe(0);
     expect(stdout).toContain("metadata:");
     expect(stdout).toContain("not cached");
@@ -940,7 +942,9 @@ describe("dot chain", () => {
   });
 
   test("info --json returns structured object with metadata: null when not cached", async () => {
-    const { stdout, exitCode } = await runCli(["chain", "info", "polkadot", "--json"]);
+    const { stdout, exitCode } = await runCli(["chain", "info", "polkadot", "--json"], {
+      noMetadataFingerprint: true,
+    });
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout);
     expect(parsed.name).toBe("polkadot");

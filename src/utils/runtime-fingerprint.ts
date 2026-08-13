@@ -10,6 +10,16 @@ export interface RuntimeFingerprint {
   // restarted with a different runtime). The authoritative staleness signal.
   codeHash: string;
   fetchedAt: string;
+  // Version decoded from the cached metadata.bin. Absent on sidecars written
+  // before metadata-version negotiation existed; such caches are treated as
+  // unknown provenance and renegotiated on the next connected command.
+  metadataVersion?: number;
+  // `Metadata_metadata_versions` result at fetch time, filtered to the window
+  // this CLI understands. Cached so the steady-state refresh check needs no RPC.
+  chainSupportedVersions?: number[];
+  // Ceiling of the CLI build that wrote this sidecar. A newer build with a
+  // higher ceiling refreshes the cache naturally via the version comparison.
+  clientMaxVersion?: number;
 }
 
 export function fingerprintsMatch(a: RuntimeFingerprint, b: RuntimeFingerprint): boolean {

@@ -5,6 +5,7 @@ import {
   Option,
   u32,
   unifyMetadata,
+  Vector,
 } from "@polkadot-api/substrate-bindings";
 import { toHex } from "@polkadot-api/utils";
 import { loadMetadata, loadMetadataFingerprint, saveMetadata } from "../config/store.ts";
@@ -27,7 +28,12 @@ import {
 
 const METADATA_TIMEOUT_MS = 15_000;
 const optionalOpaqueBytes = Option(Bytes());
-const v15Arg = toHex(u32.enc(15));
+const u32Vector = Vector(u32);
+
+// Metadata versions this CLI build can decode. The ceiling participates in the
+// cache refresh rule, so raising it invalidates existing caches naturally.
+export const CLIENT_MIN_METADATA_VERSION = 14;
+export const CLIENT_MAX_METADATA_VERSION = 16;
 
 export interface PalletInfo {
   name: string;
@@ -121,31 +127,78 @@ export async function getRuntimeFingerprint(
   };
 }
 
+/**
+ * Ask the runtime which metadata versions it can serve, filtered to the window
+ * this CLI understands (this drops the u32::MAX "unstable" sentinel). Runtimes
+ * predating the `Metadata_metadata_versions` API (pre-2023) fail the call, in
+ * which case v14 via `state_getMetadata` is the only option.
+ */
+export async function negotiateMetadataVersions(
+  clientHandle: ClientHandle,
+  chainName: string,
+): Promise<number[]> {
+  try {
+    const hex = await withTimeout(
+      clientHandle.client._request<string>("state_call", ["Metadata_metadata_versions", "0x"]),
+      chainName,
+    );
+    const versions = u32Vector
+      .dec(hexToBytes(hex))
+      .filter((v) => v >= CLIENT_MIN_METADATA_VERSION && v <= CLIENT_MAX_METADATA_VERSION);
+    if (versions.length > 0) return versions;
+  } catch {
+    // fall through
+  }
+  return [CLIENT_MIN_METADATA_VERSION];
+}
+
+/**
+ * Fetch a specific metadata version via `Metadata_metadata_at_version` without
+ * touching the cache. Returns undefined when the runtime doesn't serve that
+ * version. Besides the negotiated fetch below, this is the seam that lets a
+ * future `CheckMetadataHash` implementation obtain v15 bytes for the hasher
+ * even when the cache holds v16 — the merkleized hash must always be computed
+ * from v15 (the runtime side hashes nothing else; v15/v16 hashes diverge).
+ */
+export async function fetchMetadataAtVersion(
+  clientHandle: ClientHandle,
+  chainName: string,
+  version: number,
+): Promise<Uint8Array | undefined> {
+  try {
+    const hex = await withTimeout(
+      clientHandle.client._request<string>("state_call", [
+        "Metadata_metadata_at_version",
+        toHex(u32.enc(version)),
+      ]),
+      chainName,
+    );
+    const decoded = optionalOpaqueBytes.dec(hexToBytes(hex));
+    return decoded !== undefined ? new Uint8Array(decoded) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function fetchMetadataFromChain(
   clientHandle: ClientHandle,
   chainName: string,
 ): Promise<Uint8Array> {
   const { client } = clientHandle;
 
+  const supportedVersions = await negotiateMetadataVersions(clientHandle, chainName);
+  const target = Math.max(...supportedVersions);
+
   let bytes: Uint8Array | undefined;
 
-  // Try v15 metadata first (includes runtime API info)
-  try {
-    const hex = await withTimeout(
-      client._request<string>("state_call", ["Metadata_metadata_at_version", v15Arg]),
-      chainName,
-    );
-    const raw = hexToBytes(hex);
-    const decoded = optionalOpaqueBytes.dec(raw);
-    if (decoded !== undefined) {
-      bytes = new Uint8Array(decoded);
-    }
-  } catch {
-    // v15 not available, fall through to v14
+  if (target >= 15) {
+    bytes = await fetchMetadataAtVersion(clientHandle, chainName, target);
   }
 
   if (!bytes) {
-    // Fall back to state_getMetadata (v14)
+    // v14, served by `state_getMetadata`. Note this RPC returns v14 forever by
+    // construction (`construct_runtime` generates `metadata() -> into_v14`),
+    // so it is a fallback, never a negotiation target.
     try {
       const hex = await withTimeout(client._request<string>("state_getMetadata", []), chainName);
       bytes = hexToBytes(hex);
@@ -164,11 +217,47 @@ export async function fetchMetadataFromChain(
   let fingerprint: RuntimeFingerprint | undefined;
   try {
     fingerprint = await getRuntimeFingerprint(clientHandle, chainName);
+    fingerprint.metadataVersion = peekMetadataVersion(bytes) ?? undefined;
+    fingerprint.chainSupportedVersions = supportedVersions;
+    fingerprint.clientMaxVersion = CLIENT_MAX_METADATA_VERSION;
   } catch {
     fingerprint = undefined;
   }
   await saveMetadata(chainName, bytes, fingerprint);
   return bytes;
+}
+
+/**
+ * Read the version out of a raw metadata blob without decoding it: the blob is
+ * the "meta" magic (0x6d657461) followed by a u8 version. Returns null when
+ * the bytes don't look like metadata.
+ */
+export function peekMetadataVersion(bytes: Uint8Array): number | null {
+  if (bytes.length < 5) return null;
+  if (bytes[0] !== 0x6d || bytes[1] !== 0x65 || bytes[2] !== 0x74 || bytes[3] !== 0x61) return null;
+  return bytes[4]!;
+}
+
+/**
+ * Decide whether a cached blob should be refetched, given the versions the
+ * chain reported when it was written. Pure so it can be unit-tested; the
+ * comparison uses this build's ceiling, so a CLI upgrade that raises
+ * CLIENT_MAX_METADATA_VERSION invalidates old caches naturally. Costs no RPC:
+ * both inputs come from the cache.
+ */
+export function shouldRefreshCachedMetadata(
+  blobVersion: number | null,
+  fingerprint: RuntimeFingerprint | null,
+): boolean {
+  // No sidecar, or one written before negotiation existed: unknown provenance
+  // (e.g. polkadot-api used to rewrite the blob without one) — renegotiate.
+  if (!fingerprint?.chainSupportedVersions?.length) return true;
+  if (blobVersion === null) return true;
+  const target = Math.min(
+    Math.max(...fingerprint.chainSupportedVersions),
+    CLIENT_MAX_METADATA_VERSION,
+  );
+  return blobVersion < target;
 }
 
 function withTimeout<T>(promise: Promise<T>, chainName: string): Promise<T> {
@@ -267,6 +356,18 @@ export async function getOrFetchMetadata(
       );
     }
     raw = await fetchMetadataFromChain(clientHandle, chainName);
+  } else if (clientHandle) {
+    // Connected anyway — upgrade the cache if the chain offers a newer
+    // metadata version than the blob holds (or if the blob's provenance is
+    // unknown). Steady state is a fingerprint read plus a 5-byte peek, no RPC.
+    const fingerprint = await loadMetadataFingerprint(chainName);
+    if (shouldRefreshCachedMetadata(peekMetadataVersion(raw), fingerprint)) {
+      try {
+        raw = await fetchMetadataFromChain(clientHandle, chainName);
+      } catch {
+        // Refresh is opportunistic — a cached blob beats a failed fetch.
+      }
+    }
   }
 
   return parseMetadata(raw);

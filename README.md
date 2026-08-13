@@ -1019,7 +1019,7 @@ dot polkadot.apis.Core.version --help
 
 `api` is an alias for `apis`.
 
-Runtime API info requires v15 metadata. If `dot <chain>.apis` shows 0 APIs, update the cached metadata:
+Runtime API info requires v15+ metadata (the CLI negotiates the highest version the chain supports, currently up to v16). If `dot <chain>.apis` shows 0 APIs, update the cached metadata:
 
 ```bash
 dot chain update polkadot   # specific chain
@@ -2215,6 +2215,8 @@ Config and metadata caches live in `~/.polkadot/` by default:
         ├── metadata.bin              # cached SCALE-encoded metadata
         └── metadata.fingerprint.json # runtime fingerprint (specVersion, codeHash, …) for stale-metadata detection
 ```
+
+Metadata is fetched at the highest version both the chain and the CLI support (negotiated via `Metadata_metadata_versions`, currently up to v16; chains without that runtime API fall back to v14). The fingerprint records which version the cache holds — a cache below the negotiated version, or one written by an older CLI without version info, is refreshed automatically on the next connected command.
 
 > **Warning:** `accounts.json` stores secrets (mnemonics and seeds) in **plain text**. Encrypted-at-rest storage is planned but not yet implemented. Keep appropriate file permissions (`chmod 600 ~/.polkadot/accounts.json`) and do not use this for high-value mainnet accounts.
 

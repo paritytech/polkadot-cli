@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { CliError } from "../utils/errors.ts";
@@ -138,6 +138,14 @@ export async function loadMetadata(chainName: string): Promise<Uint8Array | null
   return null;
 }
 
+// Write-then-rename so a crash mid-write never leaves a truncated blob, and a
+// concurrent reader sees either the old cache or the new one, never a mix.
+async function writeFileAtomic(path: string, data: Uint8Array | string): Promise<void> {
+  const tmp = `${path}.tmp-${process.pid}`;
+  await writeFile(tmp, data);
+  await rename(tmp, path);
+}
+
 export async function saveMetadata(
   chainName: string,
   data: Uint8Array,
@@ -145,9 +153,9 @@ export async function saveMetadata(
 ): Promise<void> {
   const dir = getChainDir(chainName);
   await ensureDir(dir);
-  await writeFile(getMetadataPath(chainName), data);
+  await writeFileAtomic(getMetadataPath(chainName), data);
   if (fingerprint) {
-    await writeFile(
+    await writeFileAtomic(
       getMetadataFingerprintPath(chainName),
       `${JSON.stringify(fingerprint, null, 2)}\n`,
     );
