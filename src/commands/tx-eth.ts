@@ -1,7 +1,7 @@
 import { Binary, type TxEvent } from "polkadot-api";
 import type { ChainConfig } from "../config/types.ts";
 import { primaryRpc } from "../config/types.ts";
-import { resolveEthereumPrivateKey, toSs58 } from "../core/accounts.ts";
+import { type EthereumIdentity, resolveEthereumPrivateKey, toSs58 } from "../core/accounts.ts";
 import { type ClientHandle, createChainClient } from "../core/client.ts";
 import {
   decodeRevertData,
@@ -244,6 +244,25 @@ function deployedContractFromEvents(
   return isH160Hex(hex) ? toEip55(h160FromHex(hex)) : undefined;
 }
 
+// Which contract address a deployment may report, if any. A dispatch error
+// created no contract, so neither the event nor the predicted address may be
+// shown — emitting one would hand a script an address that does not exist.
+// Before inclusion there is no event yet, but the signed nonce already fixes
+// the address, so it is offered as `predicted`.
+function deployReport(
+  result: { type: string; ok?: boolean; events?: readonly unknown[] },
+  predictedContract: string | undefined,
+): { address: string; predicted: boolean } | undefined {
+  if (result.type === "broadcasted") {
+    return predictedContract ? { address: predictedContract, predicted: true } : undefined;
+  }
+  if (!result.ok) return undefined;
+  const address =
+    deployedContractFromEvents(result.events as Parameters<typeof deployedContractFromEvents>[0]) ??
+    predictedContract;
+  return address ? { address, predicted: false } : undefined;
+}
+
 // Render the Err side of ReviveApi.eth_transact — `Data(Vec<u8>)` carries the
 // contract's revert data, `Message(string)` a runtime-side message.
 async function formatEthTransactError(err: { type: string; value: unknown }): Promise<string> {
@@ -269,6 +288,9 @@ export async function handleEthereumTx(
   chainName: string,
   chainConfig: ChainConfig,
   opts: EthereumTxOptions,
+  // Supplied by the caller, which already resolved it to decide on this path.
+  // Optional so the pre-connect guards stay callable without a keystore.
+  identity?: EthereumIdentity,
 ): Promise<void> {
   if (/^0x[0-9a-fA-F]+$/.test(target)) {
     throw new CliError(
@@ -306,7 +328,7 @@ export async function handleEthereumTx(
   const nonceOverride = parseNonceOption(opts.nonce);
   const waitLevel = parseWaitLevel(opts.wait);
 
-  const privateKey = await resolveEthereumPrivateKey(accountName);
+  const privateKey = identity?.privateKey ?? (await resolveEthereumPrivateKey(accountName));
   const fromH160 = toEip55(await ethereumAddressFromPrivateKey(privateKey));
   const fallbackSs58 = toSs58(h160ToFallbackAccountId(h160FromHex(fromH160)));
 
@@ -470,9 +492,7 @@ export async function handleEthereumTx(
         from: { name: accountName, address: fromH160 },
         to: call.dest,
         deploy: isDeploy || undefined,
-        contract: isDeploy
-          ? (deployedContractFromEvents(result.events) ?? predictedContract)
-          : undefined,
+        contract: isDeploy ? deployReport(result, predictedContract)?.address : undefined,
         blockNumber: result.block.number,
         blockHash,
         txHash: result.txHash,
@@ -499,15 +519,16 @@ export async function handleEthereumTx(
     console.log(`  ${BOLD}Chain:${RESET}  ${chainName} ${DIM}(eth chain id ${chainId})${RESET}`);
     console.log(`  ${BOLD}From:${RESET}   ${accountName} (${fromH160})`);
     if (isDeploy) {
-      // A broadcast-only result carries no events yet; the predicted CREATE
-      // address is still correct for the nonce that was signed.
-      const deployed =
-        deployedContractFromEvents("events" in result ? result.events : undefined) ??
-        predictedContract;
       console.log(
         `  ${BOLD}Deploy:${RESET} ${byteLength(call.data)} bytes of init code ${DIM}(CREATE)${RESET}`,
       );
-      console.log(`  ${BOLD}Contract:${RESET} ${GREEN}${deployed}${RESET}`);
+      const deployed = deployReport(result, predictedContract);
+      if (deployed) {
+        const note = deployed.predicted ? ` ${DIM}(predicted — not yet in a block)${RESET}` : "";
+        console.log(
+          `  ${BOLD}Contract:${RESET} ${deployed.predicted ? deployed.address : `${GREEN}${deployed.address}${RESET}`}${note}`,
+        );
+      }
     } else {
       console.log(`  ${BOLD}To:${RESET}     ${call.dest}`);
     }
@@ -573,6 +594,7 @@ export {
   abbreviateHex,
   buildGenericTransaction,
   deployedContractFromEvents,
+  deployReport,
   formatEthTransactError,
   parseEthereumCallArgs,
   parseEthereumDeployArgs,

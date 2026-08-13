@@ -10,6 +10,7 @@ import {
   abbreviateHex,
   buildGenericTransaction,
   deployedContractFromEvents,
+  deployReport,
   formatEthTransactError,
   handleEthereumTx,
   parseEthereumCallArgs,
@@ -299,6 +300,41 @@ describe("tx-eth helpers (in-process)", () => {
     expect(deployedContractFromEvents(events)).toBe("0xc01Ee7f10EA4aF4673cFff62710E1D7792aBa8f3");
     expect(deployedContractFromEvents([])).toBeUndefined();
     expect(deployedContractFromEvents(undefined)).toBeUndefined();
+  });
+
+  test("deployReport withholds an address when the deploy failed", () => {
+    const contract = "0xc01ee7f10ea4af4673cfff62710e1d7792aba8f3";
+    const eip55 = "0xc01Ee7f10EA4aF4673cFff62710E1D7792aBa8f3";
+    const predicted = "0x3ed62137c5DB927cb137c26455969116BF0c23Cb";
+    const instantiated = [
+      {
+        type: "Revive",
+        value: { type: "Instantiated", value: { contract: { asHex: () => contract } } },
+      },
+    ];
+
+    // Success: the event wins over the prediction.
+    expect(deployReport({ type: "finalized", ok: true, events: instantiated }, predicted)).toEqual({
+      address: eip55,
+      predicted: false,
+    });
+
+    // Dispatch error: no contract exists, so neither the event nor the
+    // predicted address may be reported — scripts key off its absence.
+    expect(deployReport({ type: "finalized", ok: false, events: [] }, predicted)).toBeUndefined();
+    expect(
+      deployReport({ type: "finalized", ok: false, events: instantiated }, predicted),
+    ).toBeUndefined();
+
+    // Broadcast only: not in a block yet, but the signed nonce fixes the
+    // address, so it is offered explicitly flagged as predicted.
+    expect(deployReport({ type: "broadcasted" }, predicted)).toEqual({
+      address: predicted,
+      predicted: true,
+    });
+
+    // Success with no event and no prediction leaves nothing to report.
+    expect(deployReport({ type: "finalized", ok: true, events: [] }, undefined)).toBeUndefined();
   });
 
   test("predictCreateAddress matches the address previewnet actually assigned", async () => {

@@ -399,7 +399,7 @@ solc --optimize --bin -o out --overwrite Greeter.sol
 # invisible to the next command.
 ADDR=$(dot $CHAIN.tx.Revive.instantiate_with_code @out/Greeter.bin \
   'constructor(string)' 'hello' --from alice-eth --wait finalized --json \
-  | jq -rs 'map(select(.contract)) | last | .contract')
+  | jq -rs 'map(select(.contract)) | last // {} | .contract // "null"')
 
 [ "$ADDR" == "null" ] && { echo "deploy failed"; exit 1; }
 echo "deployed at $ADDR"
@@ -410,7 +410,7 @@ dot $CHAIN.tx.Revive.call "$ADDR" 'setGreeting(string)' 'configured' --from alic
 
 Notes:
 
-- `--json` emits NDJSON and several lines carry no `contract` (the `broadcasted` line, and an interim block line before events are decoded), hence `map(select(.contract)) | last`.
+- `--json` emits NDJSON and several lines carry no `contract` (the `broadcasted` line, and an interim block line before events are decoded), hence `map(select(.contract)) | last`. `contract` is emitted **only on a successful dispatch**, so its absence is the failure signal — that is what the `null` guard tests.
 - Budget for **two** costs: the code-upload deposit (`Revive.CodeUploadDepositReserve`, refunded when the code is removed) and the per-contract storage deposit. Both are held on the fallback account, on top of the tx fee.
 - Re-deploying identical bytecode reuses the on-chain code blob (`Revive.CodeInfoOf` refcount goes up) and only charges the storage deposit.
 - `--dry-run` first if the constructor can revert: it decodes the revert and predicts the CREATE address without spending anything.

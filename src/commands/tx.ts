@@ -310,8 +310,12 @@ export async function handleTx(
   // extrinsics — its contract call is priced, signed as an EIP-1559 tx, and
   // submitted through the unsigned Revive.eth_transact extrinsic instead.
   if (!decodeOnly && !opts.unsigned && opts.from) {
-    if ((await resolveEthereumIdentity(opts.from)) !== null) {
-      return handleEthereumTx(target, args, opts.from, chainName, chainConfig, opts);
+    // Resolved once and handed on: re-resolving inside handleEthereumTx would
+    // reload the keystore and repeat the BIP44 seed derivation for `-eth`
+    // identities on every transaction.
+    const ethIdentity = await resolveEthereumIdentity(opts.from);
+    if (ethIdentity !== null) {
+      return handleEthereumTx(target, args, opts.from, chainName, chainConfig, opts, ethIdentity);
     }
   }
 

@@ -1665,7 +1665,7 @@ dot preview-asset-hub.tx.Revive.call 0xf209…899B 'available(string)' myname123
 
 Arguments are `<dest-h160>` followed by either raw `0x` calldata or a `'signature(types)'` with its arguments (`uint*`/`int*` as integers, `bool` as `true`/`false`, `address`/`bytes*` as hex, `string` verbatim, arrays/tuples as JSON). Chain id, nonce, and gas are read from the chain; `--nonce` overrides the nonce. `--value` is in wei. A failed dry-run prints the decoded Solidity revert (`Error(string)`/`Panic(uint256)`) or the raw revert data. `--tip`, `--mortality`, `--asset`, and `--ext` do not apply and are rejected; targets other than `Revive.call` and `Revive.instantiate_with_code` error with guidance, since a secp256k1 key cannot sign substrate extrinsics.
 
-The account's fees are withdrawn from its fallback account (fund it first — see the account section above). `DOT_DRY_RUN=1` and `--dry-run`/`--no-dry-run` behave exactly as for substrate transactions.
+The account's fees are withdrawn from its fallback account (fund it first — see the account section above). `DOT_DRY_RUN=1` and `--dry-run`/`--no-dry-run` select whether the transaction is submitted, as for substrate transactions — with one difference: the ethereum path *always* performs the `ReviveApi.eth_transact` dry-run, because that is where gas and the storage deposit come from. A call that reverts is therefore reported and never submitted, and `--no-dry-run` cannot override that.
 
 #### Deploying a contract
 
