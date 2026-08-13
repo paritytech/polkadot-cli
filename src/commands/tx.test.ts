@@ -2478,7 +2478,7 @@ describe("DOT_DRY_RUN global flag", { timeout: 15_000 }, () => {
       { env: { DOT_DRY_RUN: "1" } },
     );
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("unsigned (bare)");
+    expect(stdout).toContain("unsigned (v5 general)");
     expect(stdout).toContain("N/A (unsigned transaction)");
     // Hint goes to stderr so it never corrupts stdout.
     expect(stderr).toContain("DOT_DRY_RUN is set");

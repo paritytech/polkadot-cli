@@ -17,6 +17,7 @@ import {
   getOrFetchMetadata,
   getPalletNames,
   getSignedExtensions,
+  getTransactionExtensionVersion,
   listPallets,
   PAPI_BUILTIN_EXTENSIONS,
   withBlockAvailabilityHint,
@@ -447,7 +448,7 @@ export async function handleTx(
         return;
       }
       console.log(`  ${BOLD}Chain:${RESET}  ${chainName}`);
-      console.log(`  ${BOLD}Type:${RESET}   unsigned (bare)`);
+      console.log(`  ${BOLD}Type:${RESET}   unsigned (v5 general)`);
       console.log(`  ${BOLD}Call:${RESET}   ${callHex}`);
       printDecodedCall(decodedObj, decodedStr);
       console.log(`  ${BOLD}Fees:${RESET}   ${DIM}N/A (unsigned transaction)${RESET}`);
@@ -587,7 +588,7 @@ export async function handleTx(
 
       console.log();
       console.log(`  ${BOLD}Chain:${RESET}  ${chainName}`);
-      console.log(`  ${BOLD}Type:${RESET}   unsigned (bare)`);
+      console.log(`  ${BOLD}Type:${RESET}   unsigned (v5 general)`);
       console.log(`  ${BOLD}Call:${RESET}   ${callHex}`);
       printDecodedCall(decodedObj, decodedStr);
       console.log(`  ${BOLD}Tx:${RESET}     ${result.txHash}`);
@@ -1686,14 +1687,24 @@ function unsignedDefaultForType(identifier: string, entry: any): any {
  * defaulted for unsigned/authorized submission.
  *
  * Byte layout:
- *   compact(payload_len) | 0x45 | ext_version(0x00) | ext_extras... | call_data
+ *   compact(payload_len) | 0x45 | ext_version | ext_extras... | call_data
  */
 function buildGeneralTx(
   meta: MetadataBundle,
   callData: Uint8Array,
   userExtOverrides: Record<string, any>,
 ): Uint8Array {
-  const extensions = getSignedExtensions(meta);
+  // The preamble's extension-version byte and the extension set must come
+  // from the same key of the metadata's version map.
+  const extensionVersion = getTransactionExtensionVersion(meta);
+  if (extensionVersion === null || extensionVersion > 0xff) {
+    throw new CliError(
+      extensionVersion === null
+        ? "This chain's metadata declares no transaction-extension versions — cannot build a general transaction."
+        : `Transaction-extension version ${extensionVersion} does not fit the v5 preamble's u8 version byte.`,
+    );
+  }
+  const extensions = getSignedExtensions(meta, extensionVersion);
   const extBytes: Uint8Array[] = [];
 
   for (const ext of extensions) {
@@ -1722,8 +1733,8 @@ function buildGeneralTx(
     extBytes.push(codec.enc(value));
   }
 
-  // Assemble: 0x45 | ext_version(0x00) | ext_extras | call_data
-  const extVersion = new Uint8Array([0x00]);
+  // Assemble: 0x45 | ext_version | ext_extras | call_data
+  const extVersion = new Uint8Array([extensionVersion]);
   const versionByte = new Uint8Array([0x45]);
 
   // Calculate total payload length

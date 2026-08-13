@@ -1456,7 +1456,7 @@ Every Substrate transaction carries a list of transaction extensions (also known
 # List every transaction extension on the chain
 dot polkadot.extensions
 # Output:
-# Transaction extensions on polkadot (11)
+# Transaction extensions on polkadot (11, extension version 0)
 #
 #   AuthorizeCall              unknown               [custom]
 #   ChargeTransactionPayment   Compact<u128>         [builtin]
@@ -1494,7 +1494,7 @@ Each entry is tagged:
   dot tx.<Pallet>.<Call> --from <acc> --chain <chain> --ext '{"<Identifier>":{"value":<v>}}'
   ```
 
-The detail view also shows the extension's `additionalSigned` type (included in the signed payload but not in the transaction body). `--json` output emits structured records with `identifier`, `valueType`, `additionalSignedType`, `valueTypeId`, `additionalSignedTypeId`, and `isBuiltin` — handy for agents and scripts that generate `--ext` payloads automatically.
+The detail view also shows the extension's `additionalSigned` type (included in the signed payload but not in the transaction body). `--json` output emits structured records with `identifier`, `valueType`, `additionalSignedType`, `valueTypeId`, `additionalSignedTypeId`, and `isBuiltin`, plus the top-level `extensionVersion` (the transaction-extension version the listed set belongs to — every live chain exposes exactly version `0` today) and `availableVersions` — handy for agents and scripts that generate `--ext` payloads automatically.
 
 This is the companion discovery surface for [Custom signed extensions](#custom-signed-extensions) below — run `dot <chain>.extensions` first to learn what the chain expects, then pass the right values to `dot tx ... --ext`.
 

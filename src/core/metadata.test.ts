@@ -21,6 +21,8 @@ import {
   getRuntimeApiNames,
   getSignedExtensionNames,
   getSignedExtensions,
+  getTransactionExtensionVersion,
+  getTransactionExtensionVersions,
   type Lookup,
   listPallets,
   listRuntimeApis,
@@ -239,6 +241,63 @@ describe("getSignedExtensions", () => {
       expect(typeof ext.type).toBe("number");
       expect(typeof ext.additionalSigned).toBe("number");
     }
+  });
+
+  test("preserves metadata order — never sorted", () => {
+    // Signing payloads encode extensions in metadata order, so the accessor
+    // must return them exactly as declared.
+    const raw = meta.unified.extrinsic.signedExtensions[0]!.map((e) => e.identifier);
+    expect(getSignedExtensions(meta).map((e) => e.identifier)).toEqual(raw);
+    const sorted = [...raw].sort((a, b) => a.localeCompare(b));
+    expect(raw).not.toEqual(sorted);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getTransactionExtensionVersion(s) — synthetic multi-version metadata, since
+// no live chain exposes more than {0} yet
+// ---------------------------------------------------------------------------
+
+function syntheticVersionedMeta(
+  byVersion: Record<number, Array<{ identifier: string; type: number; additionalSigned: number }>>,
+): MetadataBundle {
+  return { unified: { extrinsic: { signedExtensions: byVersion } } } as unknown as MetadataBundle;
+}
+
+describe("getTransactionExtensionVersion", () => {
+  test("real metadata exposes exactly version 0", () => {
+    expect(getTransactionExtensionVersions(meta)).toEqual([0]);
+    expect(getTransactionExtensionVersion(meta)).toBe(0);
+  });
+
+  test("picks the highest version, not the first key", () => {
+    const ext = (identifier: string) => ({ identifier, type: 0, additionalSigned: 0 });
+    const synthetic = syntheticVersionedMeta({
+      0: [ext("CheckNonce")],
+      1: [ext("CheckNonce"), ext("VerifyMultiSignature")],
+    });
+    expect(getTransactionExtensionVersion(synthetic)).toBe(1);
+    expect(getSignedExtensions(synthetic).map((e) => e.identifier)).toEqual([
+      "CheckNonce",
+      "VerifyMultiSignature",
+    ]);
+  });
+
+  test("an explicit version selects that set (v4 signing always uses 0)", () => {
+    const ext = (identifier: string) => ({ identifier, type: 0, additionalSigned: 0 });
+    const synthetic = syntheticVersionedMeta({
+      0: [ext("CheckNonce")],
+      1: [ext("VerifyMultiSignature")],
+    });
+    expect(getSignedExtensions(synthetic, 0).map((e) => e.identifier)).toEqual(["CheckNonce"]);
+    expect(getSignedExtensions(synthetic, 2)).toEqual([]);
+  });
+
+  test("empty version map yields null / empty", () => {
+    const synthetic = syntheticVersionedMeta({});
+    expect(getTransactionExtensionVersion(synthetic)).toBeNull();
+    expect(getTransactionExtensionVersions(synthetic)).toEqual([]);
+    expect(getSignedExtensions(synthetic)).toEqual([]);
   });
 });
 

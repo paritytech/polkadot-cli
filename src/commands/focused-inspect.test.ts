@@ -666,8 +666,9 @@ describe("stdout/stderr separation (pipe-safe output)", () => {
 });
 
 describe("dot extensions", () => {
-  test("lists extensions with types", async () => {
+  test("lists extensions with types and the extension version", async () => {
     const { stdout, exitCode } = await runCli(["extensions"]);
+    expect(stdout).toContain("extension version 0");
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Transaction extensions");
     expect(stdout).toContain("CheckMortality");
@@ -715,6 +716,8 @@ describe("dot extensions", () => {
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout);
     expect(parsed.chain).toBe("polkadot");
+    expect(parsed.extensionVersion).toBe(0);
+    expect(parsed.availableVersions).toEqual([0]);
     expect(Array.isArray(parsed.extensions)).toBe(true);
     const mortality = parsed.extensions.find((e: any) => e.identifier === "CheckMortality");
     expect(mortality).toBeDefined();
