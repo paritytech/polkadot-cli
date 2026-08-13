@@ -1465,6 +1465,27 @@ describe("buildCustomSignedExtensions", () => {
     const result = buildCustomSignedExtensions(meta, {});
     expect(Object.keys(result).length).toBe(0);
   });
+
+  test("user override of a builtin extension is passed through, not dropped", () => {
+    const override = { value: { type: "Enabled", value: undefined } };
+    const result = buildCustomSignedExtensions(meta, { CheckMetadataHash: override });
+    expect(result.CheckMetadataHash).toEqual(override);
+  });
+
+  test("user override of a builtin does not affect other builtins", () => {
+    const result = buildCustomSignedExtensions(meta, {
+      CheckMetadataHash: { value: { type: "Disabled", value: undefined } },
+    });
+    expect(result).not.toHaveProperty("CheckNonce");
+    expect(result).not.toHaveProperty("ChargeTransactionPayment");
+    expect(Object.keys(result)).toEqual(["CheckMetadataHash"]);
+  });
+
+  test("unknown extension name throws with the chain's extension list", () => {
+    expect(() => buildCustomSignedExtensions(meta, { CheckMetadataHsh: {} })).toThrow(
+      /Unknown transaction extension "CheckMetadataHsh".*CheckMetadataHash/s,
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

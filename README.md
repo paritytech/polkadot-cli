@@ -1490,6 +1490,8 @@ For manual override, use `--ext` with a JSON object:
 dot polkadot.tx.System.remark 0xdeadbeef --from alice --ext '{"MyExtension":{"value":"..."}}'
 ```
 
+`--ext` overrides work for `[builtin]` extensions too — for example `--ext '{"CheckMetadataHash":{"value":{"type":"Enabled"}}}'` replaces the value `polkadot-api` would fill in itself. Passing an extension name the chain doesn't declare is an error.
+
 Not sure which extensions a chain exposes? Run `dot <chain>.extensions` (see [Transaction extensions](#transaction-extensions)) to list them all with value types and a `[builtin]` / `[custom]` marker.
 
 #### Transaction options
