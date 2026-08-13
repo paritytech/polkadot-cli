@@ -337,10 +337,14 @@ export async function resolveAccountSigner(name: string): Promise<PolkadotSigner
   return getPolkadotSigner(keypair.publicKey, "Sr25519", keypair.sign);
 }
 
-/** Signer producing v5 General extrinsics (signature inside VerifyMultiSignature). */
-export async function resolveAccountV5Signer(name: string): Promise<PolkadotSigner> {
-  const keypair = await resolveAccountKeypair(name);
-  return createV5GeneralSigner(keypair.publicKey, keypair.sign);
+/** Wrap a keypair in the signer matching the chosen extrinsic version. */
+export function signerFromKeypair(
+  keypair: { publicKey: Uint8Array; sign: (msg: Uint8Array) => Uint8Array },
+  extrinsicVersion: 4 | 5,
+): PolkadotSigner {
+  return extrinsicVersion === 5
+    ? createV5GeneralSigner(keypair.publicKey, keypair.sign)
+    : getPolkadotSigner(keypair.publicKey, "Sr25519", keypair.sign);
 }
 
 export async function resolveAccountExpandedSecret(name: string): Promise<Uint8Array> {
