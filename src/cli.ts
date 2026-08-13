@@ -108,6 +108,7 @@ if (process.argv[2] === "__complete") {
       'Block hash, "best", or "finalized" to read/validate against (tx, query, apis)',
     )
     .option("--unsigned", "Submit as unsigned/bare transaction (no signer required, for tx)")
+    .option("--value <wei>", "Value to transfer with an ethereum contract call, in wei (for tx)")
     .option("--refresh", "Refresh the cached RPC method list from the node (for rpc)")
     .action(
       async (
@@ -131,6 +132,7 @@ if (process.argv[2] === "__complete") {
           mortality?: string;
           at?: string;
           unsigned?: boolean;
+          value?: string;
           dump?: boolean;
           refresh?: boolean;
           var?: string | string[];
@@ -144,6 +146,8 @@ if (process.argv[2] === "__complete") {
         // Read --at from raw argv to bypass CAC/mri's numeric coercion of
         // hex block hashes. opts.at is unreliable for hex strings.
         const atRaw = readRawOptionValue("at");
+        // Same for --value: wei amounts exceed Number precision (1 DOT ≈ 1e18 wei).
+        const valueRaw = readRawOptionValue("value");
 
         // --- File-based command input ---
         if (isFilePath(dotpath)) {
@@ -301,6 +305,7 @@ if (process.argv[2] === "__complete") {
               tip: opts.tip,
               mortality: opts.mortality,
               at: atRaw,
+              value: valueRaw,
             };
             if (parsed.pallet && /^0x[0-9a-fA-F]+$/.test(parsed.pallet)) {
               await handleTx(parsed.pallet, args, txOpts);
@@ -395,6 +400,9 @@ if (process.argv[2] === "__complete") {
     );
     console.log("  dot tx.System.remark 0xdead --from alice --chain polkadot");
     console.log("  dot tx.People.create_people_collection --unsigned --chain polkadot-people");
+    console.log(
+      "  dot tx.Revive.call 0xf209… 'available(string)' abc --from <eth-acct> --chain <chain>",
+    );
     console.log("  dot polkadot.const.Balances.ExistentialDeposit");
     console.log("  dot polkadot.events.Balances                        List events in Balances");
     console.log("  dot polkadot.apis.Core.version                      Call a runtime API");

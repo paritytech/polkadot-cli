@@ -14,9 +14,10 @@ import type { PolkadotSigner } from "polkadot-api/signer";
 import { getPolkadotSigner } from "polkadot-api/signer";
 import { findAccount, loadAccounts } from "../config/accounts-store.ts";
 import type { AccountsFile } from "../config/accounts-types.ts";
-import { type EnvSecret, isEnvSecret } from "../config/accounts-types.ts";
+import { type EnvSecret, isEnvSecret, isEthereumAccount } from "../config/accounts-types.ts";
 import { describeConfigDir } from "../config/store.ts";
 import { findClosest } from "../utils/fuzzy-match.ts";
+import { ethereumKeyFromMnemonic, isEthereumPrivateKey } from "./ethereum.ts";
 
 export const DEV_NAMES = ["alice", "bob", "charlie", "dave", "eve", "ferdie"] as const;
 
@@ -319,6 +320,12 @@ export async function resolveAccountKeypair(
   const accountsFile = await loadAccounts();
   const account = findAccount(accountsFile, name);
   if (!account) {
+    // A `<base>-eth` derived identity is an ethereum signer, never sr25519.
+    if (name.toLowerCase().endsWith("-eth") && (await resolveEthereumIdentity(name)) !== null) {
+      throw new Error(
+        `"${name}" is an ethereum identity (secp256k1). It cannot sign substrate extrinsics — it acts through Revive.eth_transact on chains with pallet-revive (e.g. dot <chain>.tx.Revive.call … --from ${name}).`,
+      );
+    }
     throw unknownAccountError(name, accountsFile);
   }
 
@@ -328,7 +335,99 @@ export async function resolveAccountKeypair(
     );
   }
 
+  if (isEthereumAccount(account)) {
+    throw new Error(
+      `Account "${name}" is an Ethereum (secp256k1) account. It cannot sign substrate extrinsics — it acts through Revive.eth_transact on chains with pallet-revive (e.g. dot <chain>.tx.Revive.call … --from ${name}).`,
+    );
+  }
+
   return keypairFromSecret(resolveSecret(account.secret), account.derivationPath);
+}
+
+// The `<name>-eth` suffix selects the ethereum identity DERIVED from a
+// mnemonic-backed account (BIP44 m/44'/60'/0'/0/<index> of the same phrase).
+const ETHEREUM_SUFFIX = "-eth";
+
+export interface EthereumIdentity {
+  privateKey: string;
+  // Present when the identity is derived from a mnemonic-backed base account
+  // via the `-eth` suffix; absent for dedicated --scheme ethereum accounts.
+  derivedFrom?: { name: string; index: number };
+}
+
+// Resolve `name` to an ethereum signing identity:
+// 1. a stored --scheme ethereum account of that exact name, or
+// 2. `<base>-eth` where <base> is a dev account or a stored mnemonic-backed
+//    account — the BIP44 key derived from the same phrase (dev accounts use
+//    their position as the index: alice-eth = Alith, bob-eth = Baltathar, …).
+// Returns null when the name carries no ethereum meaning (callers fall
+// through to their normal resolution/error paths). Throws when the intent is
+// clearly ethereum but the identity cannot be produced (watch-only base,
+// non-mnemonic secret, invalid stored key).
+export async function resolveEthereumIdentity(name: string): Promise<EthereumIdentity | null> {
+  const accountsFile = await loadAccounts();
+
+  // A stored account of the exact name always wins — no magic on real names.
+  const stored = findAccount(accountsFile, name);
+  if (stored) {
+    if (!isEthereumAccount(stored)) return null;
+    if (stored.secret === undefined) {
+      throw new Error(
+        `Account "${name}" is watch-only (no secret). Cannot sign. Import with --secret or --env.`,
+      );
+    }
+    const secret = resolveSecret(stored.secret);
+    if (!isEthereumPrivateKey(secret)) {
+      throw new Error(
+        `Account "${name}" does not hold a valid Ethereum private key (expected 0x + 64 hex chars).`,
+      );
+    }
+    return { privateKey: secret };
+  }
+
+  if (!name.toLowerCase().endsWith(ETHEREUM_SUFFIX)) return null;
+  const baseName = name.slice(0, -ETHEREUM_SUFFIX.length);
+
+  if (isDevAccount(baseName)) {
+    const index = DEV_NAMES.indexOf(baseName.toLowerCase() as (typeof DEV_NAMES)[number]);
+    return {
+      privateKey: await ethereumKeyFromMnemonic(DEV_PHRASE, index),
+      derivedFrom: { name: baseName, index },
+    };
+  }
+
+  const base = findAccount(accountsFile, baseName);
+  if (!base) return null;
+  if (base.secret === undefined) {
+    throw new Error(
+      `Cannot derive an ethereum identity for "${baseName}": the account is watch-only (no secret).`,
+    );
+  }
+  if (isEthereumAccount(base)) {
+    throw new Error(
+      `"${baseName}" is already an ethereum account — use --from ${baseName} directly.`,
+    );
+  }
+  const secret = resolveSecret(base.secret);
+  if (!validateMnemonic(secret)) {
+    throw new Error(
+      `Cannot derive an ethereum identity for "${baseName}": BIP44 derivation needs the BIP39 mnemonic, but the account stores a ${secretKind(secret)}. Import the key directly instead: dot account add ${name} --scheme ethereum --secret 0x<64-hex>.`,
+    );
+  }
+  return {
+    privateKey: await ethereumKeyFromMnemonic(secret, 0),
+    derivedFrom: { name: base.name, index: 0 },
+  };
+}
+
+// Resolve the raw secp256k1 private key for an ethereum identity (stored
+// --scheme ethereum account or `<name>-eth` derived form).
+export async function resolveEthereumPrivateKey(name: string): Promise<string> {
+  const identity = await resolveEthereumIdentity(name);
+  if (!identity) {
+    throw unknownAccountError(name, await loadAccounts());
+  }
+  return identity.privateKey;
 }
 
 export async function resolveAccountSigner(name: string): Promise<PolkadotSigner> {
@@ -351,6 +450,12 @@ export async function resolveAccountExpandedSecret(name: string): Promise<Uint8A
   if (account.secret === undefined) {
     throw new Error(
       `Account "${name}" is watch-only (no secret). Cannot derive private key. Import with --secret or --env.`,
+    );
+  }
+
+  if (isEthereumAccount(account)) {
+    throw new Error(
+      `Account "${name}" is an Ethereum (secp256k1) account and has no sr25519 key. Use \`dot account inspect ${name} --show-secret\` to reveal its private key.`,
     );
   }
 

@@ -454,6 +454,9 @@ dot account add ci --env SECRET_VAR
 dot account add seeded --secret 0x1111111111111111111111111111111111111111111111111111111111111111
 dot account add raw-key --secret 0x<128-hex-char expanded secret>
 
+# Ethereum (secp256k1) account — see "Ethereum Accounts + Contract Calls" below
+dot account add dotns-admin --scheme ethereum --secret 0x<64-hex-privkey>
+
 # Generate a new account
 dot account create new-key
 # Output:
@@ -518,6 +521,48 @@ dot account add raw-dave --secret "$SECRET"   # same address as dave, can sign
 ```
 
 Mapping rule (offline, matches current `polkadot-sdk` master): if the last 12 bytes of the AccountId32 are `0xEE` the H160 is the first 20 bytes (eth-derived); otherwise `keccak256(accountId32)` and take the last 20. The reverse direction always returns the `H160 || 0xEE * 12` fallback — the full mapping after `pallet_revive.map_account` lives in on-chain `AddressSuffix` storage and isn't recoverable offline. Older `stable2412` runtimes used plain `accountId32[..20]` truncation; if you target one, compute manually.
+
+### Ethereum Identities (secp256k1) + Contract Calls via `eth_transact`
+
+Revive contracts often gate admin functions on eth-key owners/roles — addresses a substrate signer's mapped H160 can never equal (it's a keccak hash, not a key). Two ways to act as an eth identity:
+
+```bash
+# 1. DERIVED — every mnemonic-backed account has one, selected with the -eth suffix.
+#    Same phrase, BIP44 m/44'/60'/0'/0/0 (MetaMask-compatible). Dev accounts use their
+#    position as the index: alice-eth = Alith, bob-eth = Baltathar, …
+dot account inspect alice-eth        # Alith: 0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac
+dot account inspect alice            # base inspect shows the Ethereum line + --from hint
+
+# 2. DEDICATED — import/generate a raw key (MetaMask/deployer exports)
+dot account add dotns-admin --scheme ethereum --secret 0x<64-hex-privkey>
+dot account create hot-wallet --scheme ethereum
+dot account add ci-admin --scheme ethereum --env ADMIN_KEY
+```
+
+Identity = EIP-55 H160; the printed SS58 is the fallback account (H160‖0xEE×12) — fund THAT address for fees; read nonce/balance through it like any account. ⚠️ One phrase = TWO identities: substrate-signed `Revive.call` from `alice` acts as her *mapped* H160; `--from alice-eth` acts as the BIP44 address — contracts see different `msg.sender`. A real stored account named `*-eth` wins over derivation; hex-seed/expanded/watch-only bases can't derive (error suggests importing a key). `Revive.map_account` is unrelated to signing — it makes value sent to a mapped H160 reach the real account (auto on chains with `const Revive.AutoMap = true`, e.g. previewnet).
+
+With an ethereum `--from` (either kind), `tx.Revive.call` takes eth-style args and submits an EIP-1559 tx wrapped in unsigned `Revive.eth_transact` (no eth-rpc sidecar; executes with the eth address as `msg.sender`):
+
+```bash
+# Cast-style ABI signature, raw calldata, or bare value transfer (wei)
+dot preview-asset-hub.tx.Revive.call 0xf209…899B 'whiteListAddress(address,bool)' 0xAbC… true --from dotns-admin
+dot preview-asset-hub.tx.Revive.call 0x03e9…6eB1 'getBlockNumber()' --from alice-eth
+dot preview-asset-hub.tx.Revive.call 0x03e9…6eB1 0x42cbb15c --from dotns-admin
+dot preview-asset-hub.tx.Revive.call 0x7099…79C8 --value 1000000000000000000 --from dotns-admin
+# --dry-run prints gas, storage deposit, max fee, decoded revert/return data
+```
+
+Arg conventions for `'sig(types)'` args: ints as integers, `bool` as true/false, `address`/`bytes*` as 0x-hex, `string` verbatim, arrays/tuples as JSON. `--tip`/`--mortality`/`--asset`/`--ext` are rejected; ethereum accounts cannot sign substrate extrinsics (any `tx.<Pallet>.<call>` target other than `Revive.call`/`Revive.instantiate_with_code` errors with guidance).
+
+**Deploying a contract** — `tx.Revive.instantiate_with_code` sends an EIP-1559 *creation* tx (empty `to`), so the constructor's `msg.sender` is the eth address:
+
+```bash
+solc --optimize --bin -o out --overwrite Greeter.sol   # revive chains run EVM bytecode natively (code_type: Evm)
+dot preview-asset-hub.tx.Revive.instantiate_with_code @out/Greeter.bin 'constructor(string)' 'hello' --from alice-eth
+dot preview-asset-hub.tx.Revive.instantiate_with_code 0x6080… --from dotns-admin   # inline hex, no ctor args
+```
+
+Bytecode is `0x`-hex inline or `@<path>` (file may omit `0x` and end with a newline — `solc --bin`/foundry `*.bin` work as-is). Constructor args require a literal `'constructor(types)'` signature — a function signature is rejected, since it would prepend a selector and produce an undeployable blob. `--value <wei>` funds a payable constructor. The address comes from the `Revive.Instantiated` event; `--dry-run` instead predicts it from sender+nonce (standard CREATE rule) and reports gas, storage deposit, and the runtime-code size.
 
 ### Sovereign Accounts (Parachain & Pallet)
 
@@ -707,6 +752,8 @@ dot verifiable verify --proof 0x<proof> --context dotns \
 | `--dump` | query | Dump all entries of a storage map |
 | `--ext <json>` | tx | Custom signed extension values |
 | `--at <block>` | tx, query, apis | Block hash, `"best"`, or `"finalized"` to read/validate against. Defaults to finalized. Tx submission rejects `"best"`. |
+| `--scheme <s>` | account add/create | `sr25519` (default) or `ethereum` (secp256k1 key) |
+| `--value <wei>` | tx (ethereum `--from` only) | Value sent with a `Revive.call` contract call or `Revive.instantiate_with_code` deployment, in wei (18 EVM decimals) |
 
 ## Common Errors
 
@@ -714,7 +761,9 @@ dot verifiable verify --proof 0x<proof> --context dotns \
 - **`Unknown account or address "X"`** / account has no public key resolved yet — the `--from` name isn't registered. Check `dot account list`, or add it with `dot account add <name> --secret "..."` / `dot account add <name> --env VAR`.
 - **`undefined` piped into `jq`** — the literal string `undefined` is not JSON. Guard with `[ "$X" == "undefined" ]` before piping.
 - **Decode errors after a runtime upgrade** — metadata cache is keyed by chain name; register a fresh `dot chain add` alias for the upgraded chain rather than reusing the old one.
-- **Wasm trap / "validate_transaction" panic on submit** — almost always stale local metadata. The CLI now prints a `⚠ Local metadata for "<chain>" is out of date … Run: dot chain update <chain>` line right after such errors. Run that command and retry. The check uses both `specVersion` and the runtime code hash, so it also catches local-node restarts where the wasm changed but `specVersion` was kept the same. Set `DOT_TRUST_CACHED_METADATA=1` to suppress the check entirely.
+- **Wasm trap / "validate_transaction" panic on submit** — usually stale local metadata. The CLI prints a `⚠ Local metadata for "<chain>" is out of date … Run: dot chain update <chain>` line right after such errors. Run that command and retry. The check uses both `specVersion` and the runtime code hash, so it also catches local-node restarts where the wasm changed but `specVersion` was kept the same. Set `DOT_TRUST_CACHED_METADATA=1` to suppress the check entirely. **If that hint does NOT appear, the metadata is current and the cause is different** — the runtime genuinely panicked while validating. Seen for real when the extrinsic's transaction extensions don't match what the runtime expects for that call (see `Revive.eth_transact`, submitted bare precisely to avoid this). A dry-run succeeding while submit traps is the signature: dry-runs are runtime-API reads and never go through `validate_transaction`.
+- **`cannot sign substrate extrinsics` from an ethereum account** — an `--scheme ethereum` account only submits contract calls (`dot <chain>.tx.Revive.call … --from <name>`) and deployments (`dot <chain>.tx.Revive.instantiate_with_code … --from <name>`) on pallet-revive chains. For ordinary extrinsics use an sr25519 account. If the eth tx fails with a fee/balance error, fund the account's **fallback SS58** (shown by `dot account inspect <name>`), not the H160.
+- **`Dry-run failed: Contract reverted …`** — the contract rejected the call (decoded `Error(string)`/`Panic` when possible; custom errors show raw data). Nothing was submitted; fix the args/permissions and retry.
 
 ## Scripting Patterns
 

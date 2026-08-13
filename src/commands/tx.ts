@@ -6,7 +6,7 @@ import { Binary } from "polkadot-api";
 import { stringify as stringifyYaml } from "yaml";
 import { loadConfig, resolveChain } from "../config/store.ts";
 import { primaryRpc } from "../config/types.ts";
-import { resolveAccountSigner, toSs58 } from "../core/accounts.ts";
+import { resolveAccountSigner, resolveEthereumIdentity, toSs58 } from "../core/accounts.ts";
 import { type ClientHandle, createChainClient } from "../core/client.ts";
 import { papiLink, pjsAppsLink } from "../core/explorers.ts";
 import type { Lookup, MetadataBundle } from "../core/metadata.ts";
@@ -46,6 +46,7 @@ import { CliError, formatRuntimeError } from "../utils/errors.ts";
 import { suggestMessage } from "../utils/fuzzy-match.ts";
 import { parseValue } from "../utils/parse-value.ts";
 import { loadMeta, resolvePallet, showItemHelp } from "./focused-inspect.ts";
+import { handleEthereumTx } from "./tx-eth.ts";
 
 export type WaitLevel = "broadcast" | "best-block" | "finalized";
 
@@ -166,6 +167,8 @@ export async function handleTx(
     tip?: string;
     mortality?: string;
     at?: string;
+    /** Value in wei for ethereum-signed contract calls (Revive.eth_transact) */
+    value?: string;
     /** Pre-parsed args from a file (skip CLI string parsing, still normalize) */
     parsedArgs?: unknown;
   },
@@ -301,6 +304,28 @@ export async function handleTx(
   const { name: chainName, chain: chainConfig } = resolveChain(config, effectiveChain);
 
   const decodeOnly = opts.encode || opts.toYaml || opts.toJson;
+
+  // Ethereum signer (a --scheme ethereum account, or the `<name>-eth` identity
+  // derived from a mnemonic-backed account): it can't sign substrate
+  // extrinsics — its contract call is priced, signed as an EIP-1559 tx, and
+  // submitted through the unsigned Revive.eth_transact extrinsic instead.
+  if (!decodeOnly && !opts.unsigned && opts.from) {
+    // Resolved once and handed on: re-resolving inside handleEthereumTx would
+    // reload the keystore and repeat the BIP44 seed derivation for `-eth`
+    // identities on every transaction.
+    const ethIdentity = await resolveEthereumIdentity(opts.from);
+    if (ethIdentity !== null) {
+      return handleEthereumTx(target, args, opts.from, chainName, chainConfig, opts, ethIdentity);
+    }
+  }
+
+  if (opts.value !== undefined) {
+    throw new CliError(
+      "--value only applies to ethereum transactions (Revive.eth_transact), i.e. Revive.call " +
+        "with --from an ethereum account. For substrate extrinsics, pass the amount as a call argument.",
+    );
+  }
+
   const signer = decodeOnly || opts.unsigned ? undefined : await resolveAccountSigner(opts.from!);
 
   let clientHandle: ClientHandle | undefined;
@@ -1750,6 +1775,26 @@ function buildGeneralTx(
   return total;
 }
 
+// A bare (v5) extrinsic: `0x05 | call_data`, with no transaction extensions at
+// all. This is the format for calls the runtime authorizes by itself rather
+// than from extension data — `Revive.eth_transact`, whose origin comes from the
+// secp256k1 signature inside its payload. pallet-revive rewrites such an
+// extrinsic during `check()` and substitutes its own extension, so any
+// extensions we attached would be discarded anyway; attaching them is not
+// merely redundant but actively breaks on runtimes whose extension set has
+// shifted (asset-hub-next spec 2000035 panics in validate_transaction).
+function buildBareTx(callData: Uint8Array): Uint8Array {
+  const BARE_EXTRINSIC_V5 = 0x05;
+  const payloadLen = 1 + callData.length;
+  const lengthPrefix = scaleCompact.enc(payloadLen);
+
+  const total = new Uint8Array(lengthPrefix.length + payloadLen);
+  total.set(lengthPrefix, 0);
+  total[lengthPrefix.length] = BARE_EXTRINSIC_V5;
+  total.set(callData, lengthPrefix.length + 1);
+  return total;
+}
+
 // --- Progressive transaction tracking ---
 
 type WatchResult = TxFinalized | (TxBestBlocksState & { found: true }) | TxBroadcasted;
@@ -1866,6 +1911,7 @@ function watchTransactionJson(
 
 export {
   autoDefaultForType,
+  buildBareTx,
   buildCustomSignedExtensions,
   buildGeneralTx,
   decodeCallFallback,
@@ -1884,4 +1930,6 @@ export {
   sanitizeForSerialization,
   typeHint,
   unsignedDefaultForType,
+  watchTransaction,
+  watchTransactionJson,
 };

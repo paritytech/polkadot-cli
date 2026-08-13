@@ -45,6 +45,7 @@
     "@polkadot-labs/hdkd-helpers": "^0.0.29",
     "@scure/sr25519": "^1.0.0",
     "cac": "^7.0.0",
+    "ox": "^1.6.0",
     "polkadot-api": "^2.1.7",
     "verifiablejs": "1.4.0",
     "yaml": "^2.8.3"

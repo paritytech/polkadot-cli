@@ -9,6 +9,7 @@
 - [Big Number Arithmetic](#big-number-arithmetic)
 - [FixedU128 Rate Calculation](#fixedu128-rate-calculation)
 - [Checking Runtime Capabilities](#checking-runtime-capabilities)
+- [Contract Calls as an Ethereum Identity](#contract-calls-as-an-ethereum-identity)
 - [Common Gotchas](#common-gotchas)
 
 ---
@@ -349,6 +350,70 @@ dot polkadot-asset-hub.apis.AssetConversionApi.get_reserves "$NATIVE" "$ASSET" -
 #   "99382392973"
 # ]
 ```
+
+## Contract Calls as an Ethereum Identity
+
+Revive contracts often gate admin functions on eth-key owners/roles. The read side is a free `ReviveApi.call` dry-run from any account; the write side needs an ethereum-scheme account (`--scheme ethereum`). Idempotent check-then-act for a whitelist entry:
+
+```bash
+CTRL=0xf209507ab5e6Cf1245aeC020E94c7E213020899B   # DotnsRegistrarController (previewnet)
+WHO=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+CHAIN=preview-asset-hub
+
+# READ — encode isWhiteListed(address) and dry-run via the runtime API (no signer).
+# Selector = first 4 bytes of keccak256 of the bare signature; args are ABI-encoded.
+SEL=$(dot hash keccak256 "isWhiteListed(address)" | cut -c1-10)
+CALLDATA="${SEL}000000000000000000000000${WHO#0x}"
+ORIGIN=$(dot account inspect alice --json | jq -r .ss58)
+RESULT=$(dot $CHAIN.apis.ReviveApi.call "$ORIGIN" "$CTRL" 0 null null "$CALLDATA" --json \
+  | jq -r .result.value.data)
+
+if [ "${RESULT: -1}" != "1" ]; then
+  # WRITE — executes as the eth account's address (msg.sender), which is what
+  # the contract's onlyOwner/role check requires. Calldata is built from the
+  # signature cast-style; gas/nonce/chain-id are handled automatically.
+  dot $CHAIN.tx.Revive.call "$CTRL" 'whiteListAddress(address,bool)' "$WHO" true \
+    --from dotns-admin --wait best
+fi
+```
+
+Notes:
+
+- `--from` accepts a stored `--scheme ethereum` account or a **derived identity**: `--from alice-eth` signs with the BIP44 key (m/44'/60'/0'/0/0) of alice's mnemonic — for dev accounts this reproduces Alith/Baltathar/….
+- Fund the eth identity's **fallback SS58** (`dot account inspect <name>-eth --json | jq -r .ss58`) — fees come from there.
+- `--dry-run` on the write prints gas, storage deposit, max fee, and the decoded revert if the contract would reject the call — nothing is submitted.
+- `--value <wei>` sends value with the call (18 EVM decimals; on a 10-decimals chain the wei→planck ratio is 10^8).
+- The nonce for rapid-fire sequencing is the fallback account's `System.Account` nonce (`--nonce` overrides).
+
+### Deploy a contract, then configure it as its owner
+
+Deployment goes through the same identity, so the constructor's `msg.sender` — and therefore `owner()` — is the eth address you hold. Capture the address from the `Revive.Instantiated` event and keep scripting against it.
+
+```bash
+CHAIN=preview-asset-hub
+solc --optimize --bin -o out --overwrite Greeter.sol
+
+# Deploy. @file avoids putting kilobytes of bytecode on the command line.
+# --wait finalized matters: reads and dry-runs resolve against the finalized
+# block by default, so a contract that only exists in a best block is still
+# invisible to the next command.
+ADDR=$(dot $CHAIN.tx.Revive.instantiate_with_code @out/Greeter.bin \
+  'constructor(string)' 'hello' --from alice-eth --wait finalized --json \
+  | jq -rs 'map(select(.contract)) | last // {} | .contract // "null"')
+
+[ "$ADDR" == "null" ] && { echo "deploy failed"; exit 1; }
+echo "deployed at $ADDR"
+
+# Configure it — owner-only calls succeed because we deployed as this identity.
+dot $CHAIN.tx.Revive.call "$ADDR" 'setGreeting(string)' 'configured' --from alice-eth --wait finalized
+```
+
+Notes:
+
+- `--json` emits NDJSON and several lines carry no `contract` (the `broadcasted` line, and an interim block line before events are decoded), hence `map(select(.contract)) | last`. `contract` is emitted **only on a successful dispatch**, so its absence is the failure signal — that is what the `null` guard tests.
+- Budget for **two** costs: the code-upload deposit (`Revive.CodeUploadDepositReserve`, refunded when the code is removed) and the per-contract storage deposit. Both are held on the fallback account, on top of the tx fee.
+- Re-deploying identical bytecode reuses the on-chain code blob (`Revive.CodeInfoOf` refcount goes up) and only charges the storage deposit.
+- `--dry-run` first if the constructor can revert: it decodes the revert and predicts the CREATE address without spending anything.
 
 ## Common Gotchas
 

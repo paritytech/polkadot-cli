@@ -4,9 +4,12 @@ import type { CAC } from "cac";
 import { findAccount, loadAccounts, saveAccounts } from "../config/accounts-store.ts";
 import {
   type AccountKind,
+  type AccountScheme,
+  type AccountsFile,
   classifyAccount,
   type EnvSecret,
   isEnvSecret,
+  isEthereumAccount,
   isWatchOnly,
   type StoredAccount,
 } from "../config/accounts-types.ts";
@@ -14,6 +17,7 @@ import {
   bytesToHex,
   createNewAccount,
   DEV_NAMES,
+  type EthereumIdentity,
   fromSs58,
   getDevAddress,
   importAccount,
@@ -21,10 +25,17 @@ import {
   isHexPublicKey,
   publicKeyToHex,
   resolveAccountExpandedSecret,
+  resolveEthereumIdentity,
+  resolveSecret,
   secretKind,
   toSs58,
   tryDerivePublicKey,
 } from "../core/accounts.ts";
+import {
+  ethereumAddressFromPrivateKey,
+  generateEthereumPrivateKey,
+  isEthereumPrivateKey,
+} from "../core/ethereum.ts";
 import {
   accountIdToH160,
   h160FromHex,
@@ -57,6 +68,8 @@ ${BOLD}Usage:${RESET}
   $ dot account add <name> --secret <s> [--path <derivation>]        Import from BIP39 mnemonic or 32-byte hex seed
   $ dot account add <name> --secret 0x<128 hex>                      Import a raw 64-byte sr25519 private key (no --path)
   $ dot account add <name> --env <VAR> [--path <derivation>]         Import account backed by env variable
+  $ dot account add <name> --scheme ethereum --secret 0x<64 hex>     Import an Ethereum (secp256k1) private key
+  $ dot account inspect <name>-eth                                   Ethereum identity derived from a mnemonic account (alice-eth = Alith)
   $ dot account add <name> --parachain <id> --parachain-type <t>     Derive a parachain sovereign (t = child|sibling)
   $ dot account add <name> --pallet-id <8 chars or 0x hex>           Derive a pallet sovereign (e.g. py/trsry)
   $ dot account create|new <name> [--path <derivation>]              Create a new account
@@ -79,6 +92,8 @@ ${BOLD}Examples:${RESET}
   $ dot account add People --parachain 1004 --parachain-type child
   $ dot account add People-Sibling --parachain 1004 --parachain-type sibling
   $ dot account create my-validator
+  $ dot account create dotns-admin --scheme ethereum
+  $ dot account add dotns-admin --scheme ethereum --secret 0x1111111111111111111111111111111111111111111111111111111111111111
   $ dot account create my-staking --path //staking
   $ dot account create multi --path //polkadot//0/wallet
   $ dot account import team-accounts.json
@@ -102,7 +117,12 @@ ${YELLOW}Note: Secrets are stored unencrypted in ~/.polkadot/accounts.json.
       Use --env to keep secrets off disk entirely.
       --secret accepts a BIP39 mnemonic, a 0x 32-byte hex seed, or a
       0x 64-byte raw sr25519 private key (the value --show-secret prints).
-      Raw private keys cannot be HD-derived, so --path is rejected for them.${RESET}
+      Raw private keys cannot be HD-derived, so --path is rejected for them.
+      With --scheme ethereum, --secret is a 0x 32-byte secp256k1 private key.
+      Ethereum identities sign Revive.eth_transact transactions, not substrate
+      extrinsics. Mnemonic-backed accounts also have a derived ethereum
+      identity (BIP44 m/44'/60'/0'/0/0 of the same phrase) — select it with
+      the -eth name suffix, e.g. --from alice-eth.${RESET}
 `.trimStart();
 
 export function registerAccountCommands(cli: CAC) {
@@ -117,6 +137,7 @@ export function registerAccountCommands(cli: CAC) {
       "Secret for import: BIP39 mnemonic, 0x 32-byte hex seed, or 0x 64-byte raw private key",
     )
     .option("--env <varName>", "Environment variable name holding the secret")
+    .option("--scheme <scheme>", "Key scheme: sr25519 (default) or ethereum (secp256k1)")
     .option("--path <derivation>", "Derivation path (e.g. //staking, //polkadot//0/wallet)")
     .option("--parachain <id>", "Derive a parachain sovereign account (requires --parachain-type)")
     .option("--parachain-type <type>", "Parachain sovereign type: child or sibling")
@@ -135,6 +156,7 @@ export function registerAccountCommands(cli: CAC) {
         opts: {
           secret?: string;
           env?: string;
+          scheme?: string;
           path?: string;
           parachain?: string;
           parachainType?: string;
@@ -160,6 +182,9 @@ export function registerAccountCommands(cli: CAC) {
         // the original string token straight from argv.
         const rawSecret = rawArgValue("--secret");
         if (rawSecret != null) opts.secret = rawSecret;
+        if (opts.scheme != null && opts.scheme !== "sr25519" && opts.scheme !== "ethereum") {
+          throw new Error(`Unknown scheme "${opts.scheme}". Expected sr25519 or ethereum.`);
+        }
         switch (action) {
           case "new":
           case "create":
@@ -180,6 +205,11 @@ export function registerAccountCommands(cli: CAC) {
                 );
               }
               return accountImport(names[0], opts);
+            }
+            if (opts.scheme === "ethereum") {
+              throw new Error(
+                "--scheme ethereum requires --secret 0x<64 hex> or --env <VAR> (watch-only ethereum accounts: add the fallback SS58 or use `dot account inspect 0x<h160>`).",
+              );
             }
             return accountAddWatchOnly(names[0], names[1], opts);
           case "import":
@@ -206,7 +236,7 @@ export function registerAccountCommands(cli: CAC) {
 
 async function accountCreate(
   name: string | undefined,
-  opts: { path?: string; output?: string; json?: boolean },
+  opts: { path?: string; scheme?: string; output?: string; json?: boolean },
 ) {
   if (!name) {
     console.error("Account name is required.\n");
@@ -223,6 +253,45 @@ async function accountCreate(
   const accountsFile = await loadAccounts();
   if (findAccount(accountsFile, name)) {
     throw new Error(`Account "${name}" already exists.`);
+  }
+
+  if (opts.scheme === "ethereum") {
+    if (opts.path) {
+      throw new Error("Derivation paths are not supported for ethereum accounts. Omit --path.");
+    }
+    const privateKey = await generateEthereumPrivateKey();
+    const h160Bytes = await ethereumAddressFromPrivateKey(privateKey);
+    const publicKey = publicKeyToHex(h160ToFallbackAccountId(h160Bytes));
+    const h160 = toEip55(h160Bytes);
+    const ss58 = toSs58(publicKey);
+
+    accountsFile.accounts.push({
+      name,
+      secret: privateKey,
+      publicKey,
+      derivationPath: "",
+      scheme: "ethereum",
+    });
+    await saveAccounts(accountsFile);
+
+    if (isJsonOutput(opts)) {
+      console.log(formatJson({ name, scheme: "ethereum", address: h160, ss58, privateKey }));
+      console.error("Save this private key! It is the only way to recover this account.");
+      return;
+    }
+
+    printHeading("Account Created");
+    console.log(`  ${BOLD}Name:${RESET}         ${name}`);
+    console.log(`  ${BOLD}Scheme:${RESET}       ethereum (secp256k1)`);
+    console.log(`  ${BOLD}Address:${RESET}      ${h160}`);
+    console.log(`  ${BOLD}SS58:${RESET}         ${ss58} ${DIM}(fallback account)${RESET}`);
+    console.log(`  ${BOLD}Private Key:${RESET}  ${privateKey}`);
+    console.log();
+    console.log(
+      `  ${YELLOW}Save this private key! It is the only way to recover this account.${RESET}`,
+    );
+    console.log();
+    return;
   }
 
   const path = opts.path ?? "";
@@ -276,7 +345,14 @@ async function accountCreate(
 
 async function accountImport(
   name: string | undefined,
-  opts: { secret?: string; env?: string; path?: string; output?: string; json?: boolean },
+  opts: {
+    secret?: string;
+    env?: string;
+    scheme?: string;
+    path?: string;
+    output?: string;
+    json?: boolean;
+  },
 ) {
   if (!name) {
     console.error("Account name is required.\n");
@@ -308,6 +384,10 @@ async function accountImport(
   }
 
   const path = opts.path ?? "";
+
+  if (opts.scheme === "ethereum") {
+    return importEthereumAccount(name, accountsFile, opts);
+  }
 
   if (opts.env) {
     const publicKey = tryDerivePublicKey(opts.env, path) ?? "";
@@ -360,6 +440,94 @@ async function accountImport(
     console.log(`  ${BOLD}Address:${RESET} ${address}`);
     console.log();
   }
+}
+
+// Derive the stored publicKey (fallback AccountId32 hex) for an ethereum
+// account backed by an env var, or null when the var is unset/invalid.
+// The sr25519 counterpart is `tryDerivePublicKey` in core/accounts.ts.
+async function tryDeriveEthereumPublicKey(envVarName: string): Promise<string | null> {
+  const value = process.env[envVarName];
+  if (!value || !isEthereumPrivateKey(value)) return null;
+  return publicKeyToHex(h160ToFallbackAccountId(await ethereumAddressFromPrivateKey(value)));
+}
+
+// Import or env-register an Ethereum (secp256k1) account. The stored publicKey
+// is the fallback AccountId32 (H160 ‖ 0xEE×12), so every address-resolution
+// path (--from, tx args, balance queries) works on the substrate side too;
+// the H160 is always recoverable from it.
+async function importEthereumAccount(
+  name: string,
+  accountsFile: AccountsFile,
+  opts: { secret?: string; env?: string; path?: string; output?: string; json?: boolean },
+) {
+  if (opts.path) {
+    throw new Error(
+      "Derivation paths are not supported for ethereum accounts. Import the raw private key without --path.",
+    );
+  }
+
+  let publicKey: string;
+  let secret: string | EnvSecret;
+
+  if (opts.env) {
+    secret = { env: opts.env };
+    const derived = await tryDeriveEthereumPublicKey(opts.env);
+    if (!derived && process.env[opts.env]) {
+      throw new Error(
+        `$${opts.env} does not hold a valid Ethereum private key (expected 0x + 64 hex chars).`,
+      );
+    }
+    publicKey = derived ?? "";
+  } else {
+    if (!isEthereumPrivateKey(opts.secret!)) {
+      throw new Error(
+        "Invalid Ethereum private key. Expected a 0x-prefixed 32-byte hex string (64 hex chars).",
+      );
+    }
+    secret = opts.secret!;
+    publicKey = publicKeyToHex(
+      h160ToFallbackAccountId(await ethereumAddressFromPrivateKey(secret)),
+    );
+  }
+
+  accountsFile.accounts.push({
+    name,
+    secret,
+    publicKey,
+    derivationPath: "",
+    scheme: "ethereum",
+  });
+  await saveAccounts(accountsFile);
+
+  const h160 = publicKey
+    ? toEip55(accountIdToH160(nobleHexToBytes(publicKey.slice(2))))
+    : undefined;
+  const ss58 = publicKey ? toSs58(publicKey) : undefined;
+
+  if (isJsonOutput(opts)) {
+    console.log(
+      formatJson({
+        name,
+        scheme: "ethereum",
+        address: h160,
+        ss58,
+        env: opts.env,
+      }),
+    );
+    return;
+  }
+
+  printHeading("Account Imported");
+  console.log(`  ${BOLD}Name:${RESET}    ${name}`);
+  console.log(`  ${BOLD}Scheme:${RESET}  ethereum (secp256k1)`);
+  if (opts.env) console.log(`  ${BOLD}Env:${RESET}     ${opts.env}`);
+  if (h160) {
+    console.log(`  ${BOLD}Address:${RESET} ${h160}`);
+    console.log(`  ${BOLD}SS58:${RESET}    ${ss58} ${DIM}(fallback account)${RESET}`);
+  } else {
+    console.log(`  ${YELLOW}Address will resolve when $${opts.env} is set.${RESET}`);
+  }
+  console.log();
 }
 
 type SovereignSource =
@@ -590,6 +758,14 @@ async function accountDerive(
     throw new Error(`Cannot derive from "${sourceName}": watch-only, no secret.`);
   }
 
+  // Substrate HD derivation on a secp256k1 key would silently mint an
+  // unrelated sr25519 account from the ethereum private key.
+  if (isEthereumAccount(source)) {
+    throw new Error(
+      `Cannot derive from "${sourceName}": it is an Ethereum (secp256k1) account and does not support substrate derivation paths. Import another key with \`dot account add <name> --scheme ethereum --secret 0x<64-hex>\`.`,
+    );
+  }
+
   if (findAccount(accountsFile, newName)) {
     throw new Error(`Account "${newName}" already exists.`);
   }
@@ -667,24 +843,41 @@ type StoredAccountRow = {
   attributes: AccountAttribute[];
 };
 
-function resolveAddress(account: StoredAccount): string {
-  if (isWatchOnly(account)) {
-    return account.publicKey ? toSs58(account.publicKey) : "n/a";
-  }
+// Resolve the stored publicKey, deriving env-backed ones on the fly. Returns
+// "" when an env-backed secret is unset. Scheme-aware: an ethereum env secret
+// must not be run through the sr25519 derivation.
+async function resolvePublicKey(account: StoredAccount): Promise<string> {
+  if (account.publicKey) return account.publicKey;
   if (account.secret !== undefined && isEnvSecret(account.secret)) {
-    const pubKey =
-      account.publicKey || tryDerivePublicKey(account.secret.env, account.derivationPath) || "";
-    return pubKey ? toSs58(pubKey) : "n/a";
+    if (isEthereumAccount(account)) {
+      return (await tryDeriveEthereumPublicKey(account.secret.env)) ?? "";
+    }
+    return tryDerivePublicKey(account.secret.env, account.derivationPath) ?? "";
   }
-  return toSs58(account.publicKey);
+  return "";
+}
+
+async function resolveAddress(account: StoredAccount): Promise<string> {
+  const pubKey = await resolvePublicKey(account);
+  if (!pubKey) return "n/a";
+  // An ethereum account's identity is its H160 — show that, not the fallback SS58.
+  if (isEthereumAccount(account)) {
+    return toEip55(accountIdToH160(nobleHexToBytes(pubKey.slice(2))));
+  }
+  return toSs58(pubKey);
 }
 
 // Attribute labels mirror the `--flag` names that set the corresponding value
 // (--path, --env, --pallet-id, --parachain, --parachain-type) so users can
 // derive the flag from what they see and vice-versa.
-function buildAttributes(account: StoredAccount): AccountAttribute[] {
+async function buildAttributes(account: StoredAccount): Promise<AccountAttribute[]> {
   const attrs: AccountAttribute[] = [];
   if (account.derivationPath) attrs.push({ label: "path", value: account.derivationPath });
+  if (isEthereumAccount(account)) {
+    attrs.push({ label: "scheme", value: "ethereum" });
+    const pubKey = await resolvePublicKey(account);
+    if (pubKey) attrs.push({ label: "ss58", value: toSs58(pubKey) });
+  }
   if (account.secret !== undefined && isEnvSecret(account.secret)) {
     attrs.push({ label: "env", value: `$${account.secret.env}` });
   }
@@ -703,12 +896,12 @@ function buildAttributes(account: StoredAccount): AccountAttribute[] {
   return attrs;
 }
 
-function buildRow(account: StoredAccount): StoredAccountRow {
+async function buildRow(account: StoredAccount): Promise<StoredAccountRow> {
   return {
     account,
     kind: classifyAccount(account),
-    address: resolveAddress(account),
-    attributes: buildAttributes(account),
+    address: await resolveAddress(account),
+    attributes: await buildAttributes(account),
   };
 }
 
@@ -754,15 +947,21 @@ async function accountList(opts: { output?: string; json?: boolean } = {}) {
       address: getDevAddress(name),
       kind: "dev" as const,
     }));
-    const stored = accountsFile.accounts.map((account) => {
+    const stored = [];
+    for (const account of accountsFile.accounts) {
       const kind = classifyAccount(account);
       const entry: Record<string, unknown> = {
         name: account.name,
-        address: resolveAddress(account),
+        address: await resolveAddress(account),
         kind,
         watchOnly: isWatchOnly(account),
       };
       if (account.derivationPath) entry.derivationPath = account.derivationPath;
+      if (isEthereumAccount(account)) {
+        entry.scheme = "ethereum";
+        const pubKey = await resolvePublicKey(account);
+        if (pubKey) entry.ss58 = toSs58(pubKey);
+      }
       if (account.secret !== undefined && isEnvSecret(account.secret)) {
         entry.env = account.secret.env;
       }
@@ -778,8 +977,8 @@ async function accountList(opts: { output?: string; json?: boolean } = {}) {
           entry.source = account.source;
         }
       }
-      return entry;
-    });
+      stored.push(entry);
+    }
     console.log(formatJson({ dev, stored }));
     return;
   }
@@ -795,7 +994,7 @@ async function accountList(opts: { output?: string; json?: boolean } = {}) {
   // Stored accounts — bucketed by kind, empty sections omitted
   const buckets = new Map<AccountKind, StoredAccountRow[]>();
   for (const account of accountsFile.accounts) {
-    const row = buildRow(account);
+    const row = await buildRow(account);
     const arr = buckets.get(row.kind) ?? [];
     arr.push(row);
     buckets.set(row.kind, arr);
@@ -920,6 +1119,8 @@ async function accountInspect(
   let storedAccount: StoredAccount | undefined;
   let isDev = false;
   let isH160Fallback = false;
+  // Set when the input is a `<base>-eth` derived ethereum identity.
+  let ethIdentity: EthereumIdentity | undefined;
   // Synthetic source for the stateless-derivation branch — same shape as
   // StoredAccount.source so the JSON/pretty-print branches downstream don't
   // need a separate code path.
@@ -966,7 +1167,7 @@ async function accountInspect(
       if (account.publicKey) {
         publicKeyHex = account.publicKey;
       } else if (account.secret !== undefined && isEnvSecret(account.secret)) {
-        const derived = tryDerivePublicKey(account.secret.env, account.derivationPath);
+        const derived = await resolvePublicKey(account);
         if (!derived) {
           console.error(
             `Cannot derive public key for "${account.name}": $${account.secret.env} is not set.`,
@@ -980,17 +1181,41 @@ async function accountInspect(
         process.exit(1);
       }
     }
-    // 3. Hex public key
+    // 3. `<base>-eth` — ethereum identity derived from a mnemonic-backed
+    // account (hex/H160/SS58 inputs can never contain "-", so this is safe
+    // to check before them).
+    else if (input!.toLowerCase().endsWith("-eth")) {
+      let identity: EthereumIdentity | null = null;
+      try {
+        identity = await resolveEthereumIdentity(input!);
+      } catch (err) {
+        console.error((err as Error).message);
+        process.exit(1);
+      }
+      if (!identity) {
+        console.error(
+          `Cannot identify "${input}": no account "${input!.slice(0, -4)}" to derive an ethereum identity from.`,
+        );
+        process.exit(1);
+      }
+      ethIdentity = identity;
+      name = input!.toLowerCase();
+      hasSecret = true;
+      publicKeyHex = publicKeyToHex(
+        h160ToFallbackAccountId(await ethereumAddressFromPrivateKey(identity.privateKey)),
+      );
+    }
+    // 4. Hex public key
     else if (isHexPublicKey(input!)) {
       publicKeyHex = input!;
     }
-    // 4. H160 (20-byte hex) — revive fallback AccountId32 (H160 || 0xEE * 12)
+    // 5. H160 (20-byte hex) — revive fallback AccountId32 (H160 || 0xEE * 12)
     else if (isH160Hex(input!)) {
       const fallback = h160ToFallbackAccountId(h160FromHex(input!));
       publicKeyHex = publicKeyToHex(fallback);
       isH160Fallback = true;
     }
-    // 5. Try SS58 decode
+    // 6. Try SS58 decode
     else {
       try {
         const decoded = fromSs58(input!);
@@ -1006,6 +1231,27 @@ async function accountInspect(
 
   const ss58 = toSs58(publicKeyHex!, prefix);
   const h160Hex = toEip55(accountIdToH160(nobleHexToBytes(publicKeyHex!.slice(2))));
+
+  // Preview of the DERIVED ethereum identity for mnemonic-backed accounts
+  // (dev or stored): a different on-chain identity that shares the phrase,
+  // selected at signing time with `--from <name>-eth`. Not derivable (seed/
+  // expanded/watch-only/env-unset/already-ethereum) → silently omitted.
+  let derivedEthereum: { address: string; from: string; path: string } | undefined;
+  if (!ethIdentity && (isDev || storedAccount)) {
+    const fromName = `${(storedAccount?.name ?? input!).toLowerCase()}-eth`;
+    try {
+      const identity = await resolveEthereumIdentity(fromName);
+      if (identity?.derivedFrom) {
+        derivedEthereum = {
+          address: toEip55(await ethereumAddressFromPrivateKey(identity.privateKey)),
+          from: fromName,
+          path: `m/44'/60'/0'/0/${identity.derivedFrom.index}`,
+        };
+      }
+    } catch {
+      // no derived identity for this account — nothing to show
+    }
+  }
 
   let privateKeyHex: string | undefined;
   // The original stored secret revealed alongside the expanded private key.
@@ -1025,12 +1271,23 @@ async function accountInspect(
       process.exit(1);
     }
     try {
-      privateKeyHex = bytesToHex(await resolveAccountExpandedSecret(input!));
+      if (ethIdentity) {
+        privateKeyHex = ethIdentity.privateKey;
+      } else if (storedAccount && isEthereumAccount(storedAccount)) {
+        // The secp256k1 private key IS the stored secret — no expansion step.
+        privateKeyHex = resolveSecret(storedAccount.secret!);
+      } else {
+        privateKeyHex = bytesToHex(await resolveAccountExpandedSecret(input!));
+      }
     } catch (err) {
       console.error((err as Error).message);
       process.exit(1);
     }
-    if (storedAccount?.secret !== undefined && !isEnvSecret(storedAccount.secret)) {
+    if (
+      storedAccount?.secret !== undefined &&
+      !isEnvSecret(storedAccount.secret) &&
+      !isEthereumAccount(storedAccount)
+    ) {
       const kind = secretKind(storedAccount.secret);
       if (kind === "mnemonic") {
         revealedSecret = { label: "Mnemonic", field: "mnemonic", value: storedAccount.secret };
@@ -1057,6 +1314,13 @@ async function accountInspect(
     kindLabel = "dev";
   } else if (isH160Fallback) {
     kindLabel = "revive H160 fallback";
+  } else if (ethIdentity) {
+    kindLabel = ethIdentity.derivedFrom
+      ? `signer (ethereum, derived from ${ethIdentity.derivedFrom.name})`
+      : "signer (ethereum)";
+    if (ethIdentity.derivedFrom) {
+      derivationLine = `m/44'/60'/0'/0/${ethIdentity.derivedFrom.index}`;
+    }
   } else if (storedAccount) {
     const k = classifyAccount(storedAccount);
     if (k === "pallet" && storedAccount.source?.kind === "pallet") {
@@ -1067,7 +1331,7 @@ async function accountInspect(
       kindLabel = `parachain sovereign (${storedAccount.source.type})`;
       sourceLine = `parachain ${storedAccount.source.paraId}`;
     } else if (k === "signer") {
-      kindLabel = "signer";
+      kindLabel = isEthereumAccount(storedAccount) ? "signer (ethereum)" : "signer";
     } else {
       kindLabel = "watch-only";
     }
@@ -1111,9 +1375,14 @@ async function accountInspect(
         result.source = storedAccount.source;
       }
     }
+    if (ethIdentity || (storedAccount && isEthereumAccount(storedAccount))) {
+      result.scheme = "ethereum";
+    }
+    if (ethIdentity?.derivedFrom) result.derivedFrom = ethIdentity.derivedFrom.name;
     if (derivationLine) result.derivationPath = derivationLine;
     if (envLine) result.env = envLine.replace(/^\$/, "");
     if (bandersnatch && Object.keys(bandersnatch).length > 0) result.bandersnatch = bandersnatch;
+    if (derivedEthereum) result.ethereum = derivedEthereum;
     if (revealedSecret) result[revealedSecret.field] = revealedSecret.value;
     if (privateKeyHex) result.privateKey = privateKeyHex;
     console.log(formatJson(result));
@@ -1124,6 +1393,11 @@ async function accountInspect(
     console.log(`  ${BOLD}Public Key:${RESET}  ${publicKeyHex!}`);
     console.log(`  ${BOLD}SS58:${RESET}        ${ss58}`);
     console.log(`  ${BOLD}H160:${RESET}        ${h160Hex}`);
+    if (derivedEthereum) {
+      console.log(
+        `  ${BOLD}Ethereum:${RESET}    ${derivedEthereum.address} ${DIM}(--from ${derivedEthereum.from}, ${derivedEthereum.path})${RESET}`,
+      );
+    }
     if (sourceLine) console.log(`  ${BOLD}Source:${RESET}      ${sourceLine}`);
     if (derivationLine) console.log(`  ${BOLD}Derivation:${RESET}  ${derivationLine}`);
     if (envLine) console.log(`  ${BOLD}Env:${RESET}         ${envLine}`);
@@ -1154,8 +1428,12 @@ async function accountInspect(
       }
     }
     if (privateKeyHex) {
+      const caption =
+        ethIdentity || (storedAccount && isEthereumAccount(storedAccount))
+          ? "(secp256k1, 32 bytes — never share)"
+          : "(sr25519 expanded, 64 bytes — never share)";
       console.log(`  ${BOLD}Private Key:${RESET} ${privateKeyHex}`);
-      console.log(`               ${YELLOW}(sr25519 expanded, 64 bytes — never share)${RESET}`);
+      console.log(`               ${YELLOW}${caption}${RESET}`);
     }
     console.log();
   }
@@ -1175,6 +1453,7 @@ interface ExportedAccount {
   name: string;
   publicKey: string;
   derivationPath: string;
+  scheme?: AccountScheme;
   secret?: string | EnvSecret;
   bandersnatch?: Record<string, string>;
 }
@@ -1223,6 +1502,13 @@ async function accountExport(
       publicKey: account.publicKey,
       derivationPath: account.derivationPath,
     };
+
+    // Without the scheme an ethereum secret is indistinguishable from a
+    // 32-byte sr25519 seed on re-import, and the account would come back as a
+    // different (sr25519) identity.
+    if (isEthereumAccount(account)) {
+      entry.scheme = "ethereum";
+    }
 
     if (isWatchOnly(account)) {
       // No secret field for watch-only
@@ -1324,20 +1610,37 @@ async function accountBatchImport(
       derivationPath: entry.derivationPath || "",
     };
 
+    if (entry.scheme === "ethereum") {
+      stored.scheme = "ethereum";
+    }
+
     if (entry.secret === undefined || entry.secret === REDACTED) {
       // Watch-only: no secret, preserve publicKey
     } else if (typeof entry.secret === "object" && "env" in entry.secret) {
       // Env-backed account
       stored.secret = entry.secret;
       if (!stored.publicKey) {
-        stored.publicKey = tryDerivePublicKey(entry.secret.env, stored.derivationPath) ?? "";
+        stored.publicKey =
+          (stored.scheme === "ethereum"
+            ? await tryDeriveEthereumPublicKey(entry.secret.env)
+            : tryDerivePublicKey(entry.secret.env, stored.derivationPath)) ?? "";
       }
     } else if (typeof entry.secret === "string") {
-      // Mnemonic or hex seed — validate and derive publicKey
+      // Literal secret — validate against the entry's scheme and re-derive the
+      // publicKey from it, so a tampered/stale publicKey can never stick.
       stored.secret = entry.secret;
       try {
-        const { publicKey } = importAccount(entry.secret, stored.derivationPath);
-        stored.publicKey = publicKeyToHex(publicKey);
+        if (stored.scheme === "ethereum") {
+          if (!isEthereumPrivateKey(entry.secret)) {
+            throw new Error("not an ethereum private key");
+          }
+          stored.publicKey = publicKeyToHex(
+            h160ToFallbackAccountId(await ethereumAddressFromPrivateKey(entry.secret)),
+          );
+        } else {
+          const { publicKey } = importAccount(entry.secret, stored.derivationPath);
+          stored.publicKey = publicKeyToHex(publicKey);
+        }
       } catch {
         process.stderr.write(
           `${YELLOW}Warning: "${entry.name}" has an invalid secret, importing as watch-only.${RESET}\n`,

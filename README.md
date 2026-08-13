@@ -30,6 +30,7 @@ Ships with Polkadot and all system parachains preconfigured with multiple fallba
 - ✅ Sovereign accounts — store a parachain (child / sibling) or pallet (Treasury, Bounties, NominationPools, …) sovereign as a named watch-only account in one command
 - ✅ Message signing — sign arbitrary bytes with account keypairs for use as `MultiSignature` arguments
 - ✅ Unsigned/authorized transactions — submit governance-authorized calls without a signer (`--unsigned`)
+- ✅ Ethereum identities & contract calls — every mnemonic account has a derived MetaMask-compatible identity (`--from alice-eth` = Alith), or store a raw key with `--scheme ethereum`; `dot <chain>.tx.Revive.call` builds calldata cast-style from an ABI signature and `dot <chain>.tx.Revive.instantiate_with_code` deploys a contract, both as EIP-1559 txs via pallet-revive's `eth_transact` — no eth-rpc sidecar
 - ✅ Non-native fee payment — pay tx fees in any asset the chain accepts via `--asset` (asset-hub-style chains)
 - ✅ Bandersnatch member keys — derive Ring VRF member keys from mnemonics for on-chain member sets
 - ✅ Export/import — portable chain and account configuration for backup, sharing, and CI bootstrapping
@@ -346,6 +347,10 @@ dot account add hot-wallet --secret "word1 word2 ... word12" --path //hot
 # Add an env-var-backed account (secret stays off disk)
 dot account add ci-signer --env MY_SECRET
 
+# Ethereum (secp256k1) account — for pallet-revive contract calls as an eth identity
+dot account add dotns-admin --scheme ethereum --secret 0x<64-hex-privkey>
+dot account create hot-wallet --scheme ethereum
+
 # Derive a child account from an existing one
 dot account derive treasury treasury-staking --path //staking
 
@@ -630,6 +635,38 @@ dot account add server-signer --env PROXY_PRIVATE_KEY
 ```
 
 A raw private key cannot be HD-derived, so `--path` is rejected for this format. Imported expanded-secret accounts sign exactly like mnemonic-backed ones.
+
+#### Ethereum identities (secp256k1)
+
+Contracts on pallet-revive chains often gate admin operations on an **Ethereum-key identity**: the `owner()` or role holders are addresses derived from secp256k1 keys, which a substrate signer's mapped H160 can never equal (that H160 is `keccak(AccountId32)[12..]` — a hash, not a key, so no signer can ever be extracted from it). `dot` gives you an ethereum identity two ways.
+
+**Every mnemonic-backed account already has one — select it with the `-eth` suffix.** The same phrase derives the MetaMask-compatible BIP44 key (`m/44'/60'/0'/0/0`), so `--from <name>-eth` signs as that address anywhere an ethereum signer is accepted. Dev accounts use their position as the BIP44 index, which reproduces the well-known revive/Moonbeam dev accounts: `alice-eth` is **Alith**, `bob-eth` is **Baltathar**, and so on.
+
+```bash
+dot account inspect alice
+#   SS58:        5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY
+#   H160:        0x9621DDe636dE098B43Efb0fA9b61fAcFE328F99D          ← mapped (substrate-signed calls act as this)
+#   Ethereum:    0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac (--from alice-eth, m/44'/60'/0'/0/0)
+
+dot account inspect alice-eth
+#   Kind:        signer (ethereum, derived from alice)
+#   H160:        0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac
+#   SS58:        5HYRCKHYJN9z5xUtfFkyMj4JUhsAwWyvuU8vKB1FcnYTf9ZQ   ← fallback account: fund this for fees
+```
+
+One phrase, **two on-chain identities** — that's the thing to internalize. A substrate-signed contract call from `alice` executes as her *mapped* H160; an eth-signed call from `alice-eth` executes as the BIP44 address. Contracts see different `msg.sender` depending on which one signs. A real stored account named `<name>-eth` always wins over the derived form, and non-mnemonic secrets (hex seeds, raw sr25519 keys, watch-only) have nothing to derive from — the error tells you to import a key directly instead.
+
+**Or store a dedicated key with `--scheme ethereum`** — for keys that already exist elsewhere (MetaMask exports, deployer keys):
+
+```bash
+dot account add dotns-admin --scheme ethereum --secret 0x59c6…690d   # import (0x + 64 hex chars)
+dot account create hot-wallet --scheme ethereum                      # generate
+dot account add ci-admin --scheme ethereum --env DOTNS_ADMIN_KEY     # keep off disk
+```
+
+Either way the identity is its EIP-55 H160; the printed SS58 is the deterministic revive **fallback account** (`H160 ‖ 0xEE×12`) — fund that address to pay fees, and read balance/nonce through it like any other account. `--show-secret` reveals the secp256k1 key. Ethereum identities cannot sign substrate extrinsics, so `--path` is rejected and `dot sign`/ordinary `--from` usage errors with guidance. See [Ethereum transactions](#ethereum-transactions-pallet-revive-eth_transact) for how they transact.
+
+**Relation to `Revive.map_account`:** mapping is about *receiving*, not signing. Without an `OriginalAccount` entry, value sent to a substrate account's mapped H160 lands in the synthetic fallback account; `dot <chain>.tx.Revive.map_account --from <name>` registers the mapping so it reaches the real account (chains with the `Revive.AutoMap` constant set to `true` — previewnet asset-hub, for one — do this automatically on account creation). Ethereum identities never need it: their fallback account *is* their account.
 
 #### Export/import accounts
 
@@ -1502,6 +1539,7 @@ Override low-level transaction parameters. Useful for rapid-fire submission (cus
 | `--tip <amount>` | non-negative integer (planck) | Priority tip for the transaction pool |
 | `--mortality <spec>` | `immortal` or period (min 4) | Transaction mortality window |
 | `--at <block>` | 0x-prefixed block hash, `"best"`, or `"finalized"` | Block to read/validate against (defaults to finalized). Also honored on `query.*` and `apis.*` for historical reads; tx submission rejects `"best"`. |
+| `--value <wei>` | non-negative integer (wei, 18 EVM decimals) | Value transferred with an [ethereum contract call](#ethereum-transactions-pallet-revive-eth_transact) — only valid with an ethereum-scheme `--from` |
 
 ```bash
 # Fire-and-forget: submit two txs in rapid succession with manual nonces
@@ -1591,6 +1629,74 @@ tx:
   People:
     create_people_collection: null
 ```
+
+#### Ethereum transactions (pallet-revive `eth_transact`)
+
+When `--from` names an [ethereum identity](#ethereum-identities-secp256k1) — a `--scheme ethereum` account or the `<name>-eth` form derived from any mnemonic-backed account — `dot <chain>.tx.Revive.call` changes meaning: instead of a substrate extrinsic, the CLI prices the call via a `ReviveApi.eth_transact` dry-run, signs an **EIP-1559 transaction** with the identity's secp256k1 key, and submits it wrapped in the unsigned `Revive.eth_transact` extrinsic — over the same WebSocket connection, no eth-rpc sidecar. The call executes on-chain with the eth address as `msg.sender`, which is what contract-side `owner()`/role checks require.
+
+```bash
+# Cast-style: calldata built from a human ABI signature
+dot preview-asset-hub.tx.Revive.call 0xf209…899B 'whiteListAddress(address,bool)' 0xAbC…123 true \
+  --from dotns-admin
+
+# Same, signing with the ethereum identity derived from a mnemonic account (alice-eth = Alith)
+dot preview-asset-hub.tx.Revive.call 0x03e9…6eB1 'getBlockNumber()' --from alice-eth
+
+# Raw calldata
+dot preview-asset-hub.tx.Revive.call 0x03e9…6eB1 0x42cbb15c --from dotns-admin
+
+# Bare value transfer (value is in wei — 18 EVM decimals)
+dot preview-asset-hub.tx.Revive.call 0x7099…79C8 --value 1000000000000000000 --from dotns-admin
+
+# Dry-run: gas, storage deposit, max fee, and decoded revert/return data
+dot preview-asset-hub.tx.Revive.call 0xf209…899B 'available(string)' myname123 \
+  --from dotns-admin --dry-run
+# Output:
+#   Chain:  preview-asset-hub (eth chain id 420420417)
+#   From:   dotns-admin (0x3243631Cb1EADF0FbA31BFA8e739585c6953ba73)
+#   To:     0xf209507ab5e6Cf1245aeC020E94c7E213020899B
+#   Method: available(string)
+#   Data:   0xaeb8ce9b0000…
+#   Nonce:  2
+#   Gas:    10933 @ 1000000000000 wei
+#   Max fee: 10933000000000000 wei
+#   Return: 0x0000…0001
+```
+
+Arguments are `<dest-h160>` followed by either raw `0x` calldata or a `'signature(types)'` with its arguments (`uint*`/`int*` as integers, `bool` as `true`/`false`, `address`/`bytes*` as hex, `string` verbatim, arrays/tuples as JSON). Chain id, nonce, and gas are read from the chain; `--nonce` overrides the nonce. `--value` is in wei. A failed dry-run prints the decoded Solidity revert (`Error(string)`/`Panic(uint256)`) or the raw revert data. `--tip`, `--mortality`, `--asset`, and `--ext` do not apply and are rejected; targets other than `Revive.call` and `Revive.instantiate_with_code` error with guidance, since a secp256k1 key cannot sign substrate extrinsics.
+
+The account's fees are withdrawn from its fallback account (fund it first — see the account section above). `DOT_DRY_RUN=1` and `--dry-run`/`--no-dry-run` select whether the transaction is submitted, as for substrate transactions — with one difference: the ethereum path *always* performs the `ReviveApi.eth_transact` dry-run, because that is where gas and the storage deposit come from. A call that reverts is therefore reported and never submitted, and `--no-dry-run` cannot override that.
+
+#### Deploying a contract
+
+`dot <chain>.tx.Revive.instantiate_with_code` deploys with the same identity and transport — an EIP-1559 **creation** transaction (empty `to`, init code as data) wrapped in `Revive.eth_transact`. The deployer is the eth address, so the contract's constructor sees it as `msg.sender` and `owner()` lands on the key you hold.
+
+```bash
+# Compile with solc (revive chains run EVM bytecode natively — code_type: Evm)
+solc --optimize --bin -o out --overwrite Greeter.sol
+
+# Deploy — @file reads the hex, so the bytecode never has to fit on the command line
+dot preview-asset-hub.tx.Revive.instantiate_with_code @out/Greeter.bin \
+  'constructor(string)' 'hello previewnet' --from alice-eth
+# Output:
+#   Chain:  preview-asset-hub (eth chain id 420420417)
+#   From:   alice-eth (0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac)
+#   Deploy: 1777 bytes of init code (CREATE)
+#   Contract: 0x3ed62137c5DB927cb137c26455969116BF0c23Cb
+#   Method: constructor(string)
+#   Nonce:  2
+#   Gas:    787214 @ 1000000000000 wei
+#   Status: ok
+#   Events:
+#     Revive.Instantiated { deployer: 0xf24ff3a9…, contract: 0x3ed62137… }
+
+# Then call it as the deployer/owner
+dot preview-asset-hub.tx.Revive.call 0x3ed62137… 'setGreeting(string)' 'hi' --from alice-eth
+```
+
+The bytecode argument is either `0x`-hex inline or `@<path>` to a file of hex — with or without the `0x` prefix and trailing whitespace, so `solc --bin` and foundry `*.bin` artifacts work as-is. Constructor arguments need an explicit `'constructor(types)'` signature (a *function* signature is rejected: it would prepend a selector and produce an undeployable blob); they are ABI-encoded and appended to the init code, exactly as `cast create` does. `--value <wei>` funds a payable constructor.
+
+The deployed address is reported from the chain's `Revive.Instantiated` event. A `--dry-run` cannot observe that event, so it prints the address predicted from the sender and nonce (`keccak256(rlp([sender, nonce]))[12..]`, the standard CREATE rule that pallet-revive's EVM layer follows) along with gas, storage deposit, and the size of the runtime code the constructor would return.
 
 ### File-based commands
 
