@@ -27,7 +27,7 @@ function loadManifest(): Marketplace {
 
 function parseFrontmatter(md: string): Record<string, string> {
   const match = md.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!match || !match[1]) return {};
+  if (!match?.[1]) return {};
   const out: Record<string, string> = {};
   for (const line of match[1].split(/\r?\n/)) {
     const m = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
