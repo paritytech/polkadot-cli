@@ -27,3 +27,18 @@ export function getTestMetadataV16(): MetadataBundle {
   }
   return cachedV16;
 }
+
+// v16 snapshot of preview-people — a runtime that carries the
+// VerifyMultiSignature transaction extension, i.e. one that can authorize
+// signed Extrinsic V5 General transactions (polkadot cannot).
+export function getPeopleMetadataRaw(): Uint8Array {
+  return new Uint8Array(readFileSync(join(import.meta.dir, "people-metadata-v16.bin")));
+}
+
+let cachedPeople: MetadataBundle | null = null;
+export function getPeopleMetadata(): MetadataBundle {
+  if (!cachedPeople) {
+    cachedPeople = parseMetadata(getPeopleMetadataRaw());
+  }
+  return cachedPeople;
+}

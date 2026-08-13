@@ -108,6 +108,7 @@ if (process.argv[2] === "__complete") {
       'Block hash, "best", or "finalized" to read/validate against (tx, query, apis)',
     )
     .option("--unsigned", "Submit as unsigned/bare transaction (no signer required, for tx)")
+    .option("--v5", "Sign as an Extrinsic V5 General transaction (needs chain support, for tx)")
     .option("--refresh", "Refresh the cached RPC method list from the node (for rpc)")
     .action(
       async (
@@ -131,6 +132,7 @@ if (process.argv[2] === "__complete") {
           mortality?: string;
           at?: string;
           unsigned?: boolean;
+          v5?: boolean;
           dump?: boolean;
           refresh?: boolean;
           var?: string | string[];
@@ -172,6 +174,7 @@ if (process.argv[2] === "__complete") {
                 ...handlerOpts,
                 from: opts.from,
                 unsigned: opts.unsigned ?? cmd.unsigned,
+                v5: opts.v5,
                 dryRun: fileDryRun,
                 encode: opts.encode,
                 toYaml: opts.toYaml,
@@ -290,6 +293,7 @@ if (process.argv[2] === "__complete") {
               ...handlerOpts,
               from: opts.from,
               unsigned: opts.unsigned,
+              v5: opts.v5,
               dryRun,
               encode: opts.encode,
               toYaml: opts.toYaml,

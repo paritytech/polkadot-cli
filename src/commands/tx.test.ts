@@ -1826,6 +1826,33 @@ describe("dot tx CLI integration", () => {
     expect(stderr).toContain("already encoded");
   });
 
+  test("--v5 --unsigned rejects", async () => {
+    const { stderr, exitCode } = await runCli(["tx.System.remark", "0xaa", "--v5", "--unsigned"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("--v5 and --unsigned are mutually exclusive");
+  });
+
+  test("--v5 without --from rejects", async () => {
+    const { stderr, exitCode } = await runCli(["tx.System.remark", "0xaa", "--v5"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("--v5 requires --from");
+  });
+
+  test("--v5 on a chain that cannot authorize it rejects with the capability error", async () => {
+    // The polkadot fixture has no VerifyMultiSignature extension; the gate
+    // must fire from cached metadata, before anything is signed or submitted.
+    const { stderr, exitCode } = await runCli([
+      "tx.System.remark",
+      "0xaa",
+      "--v5",
+      "--from",
+      "alice",
+      "--dry-run",
+    ]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("can't accept signed v5 transactions");
+  });
+
   test("unknown pallet gives suggestion", async () => {
     const { stderr, exitCode } = await runCli(["tx.Systm.remark", "0xaa", "--encode"]);
     expect(exitCode).toBe(1);

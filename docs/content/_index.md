@@ -23,6 +23,7 @@ A command-line tool for interacting with Polkadot-ecosystem chains. Manage chain
 - ✅ File-based commands — run any command from a YAML/JSON file with variable substitution
 - ✅ Sovereign accounts — store a parachain (child / sibling) or pallet (Treasury, Bounties, NominationPools, …) sovereign as a named watch-only account in one command
 - ✅ Unsigned/authorized transactions — submit governance-authorized calls without a signer (`--unsigned`)
+- ✅ Extrinsic V5 General signing — opt-in `--v5` on chains that carry `VerifyMultiSignature`, capability-checked up front
 - ✅ Non-native fee payment — pay tx fees in any asset the chain accepts via `--asset` (asset-hub-style chains)
 - ✅ Message signing — sign arbitrary bytes with account keypairs for use as `MultiSignature` arguments
 - ✅ Bandersnatch member keys — derive Ring VRF member keys from mnemonics for on-chain member sets
@@ -2004,6 +2005,20 @@ tx:
 dot ./create-people-collection.yaml
 dot ./create-people-collection.yaml --dry-run
 ```
+
+### Signed v5 General transactions (`--v5`)
+
+Opt in to signing as an Extrinsic V5 "General" transaction with `--v5`. A v5 transaction has no signature field — the signature travels *inside* the `VerifyMultiSignature` transaction extension, so this only works on chains whose runtime carries that extension (currently people chains on test networks; Polkadot, Kusama, and all asset hubs do not, and must keep signing v4).
+
+```
+# Sign and submit as v5 General (chain must carry VerifyMultiSignature)
+dot preview-people.tx.System.remark "hello" --from alice --v5
+
+# Dry-run with fee estimation (queried directly from the runtime)
+dot preview-people.tx.System.remark "hello" --from alice --v5 --dry-run
+```
+
+The capability is checked up front: on a chain that can't authorize v5, the CLI refuses with a clear error instead of letting the runtime reject the submission with `UnknownOrigin`. Nonce, tip, mortality, and `--ext` overrides work exactly as on the v4 path (an `--ext` override for `VerifyMultiSignature` itself is rejected — that extension carries the v5 signature). The default remains v4 everywhere — `--v5` is strictly opt-in.
 
 ## File-Based Commands
 

@@ -17,6 +17,7 @@ import type { AccountsFile } from "../config/accounts-types.ts";
 import { type EnvSecret, isEnvSecret } from "../config/accounts-types.ts";
 import { describeConfigDir } from "../config/store.ts";
 import { findClosest } from "../utils/fuzzy-match.ts";
+import { createV5GeneralSigner } from "./extrinsic-v5.ts";
 
 export const DEV_NAMES = ["alice", "bob", "charlie", "dave", "eve", "ferdie"] as const;
 
@@ -334,6 +335,12 @@ export async function resolveAccountKeypair(
 export async function resolveAccountSigner(name: string): Promise<PolkadotSigner> {
   const keypair = await resolveAccountKeypair(name);
   return getPolkadotSigner(keypair.publicKey, "Sr25519", keypair.sign);
+}
+
+/** Signer producing v5 General extrinsics (signature inside VerifyMultiSignature). */
+export async function resolveAccountV5Signer(name: string): Promise<PolkadotSigner> {
+  const keypair = await resolveAccountKeypair(name);
+  return createV5GeneralSigner(keypair.publicKey, keypair.sign);
 }
 
 export async function resolveAccountExpandedSecret(name: string): Promise<Uint8Array> {

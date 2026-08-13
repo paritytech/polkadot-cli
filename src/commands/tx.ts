@@ -1,14 +1,16 @@
-import { compact as scaleCompact } from "@polkadot-api/substrate-bindings";
+import { u32 } from "@polkadot-api/substrate-bindings";
 import type { Decoded } from "@polkadot-api/view-builder";
 import { getViewBuilder } from "@polkadot-api/view-builder";
 import type { TxBestBlocksState, TxBroadcasted, TxEvent, TxFinalized } from "polkadot-api";
 import { Binary } from "polkadot-api";
+import type { PolkadotSigner } from "polkadot-api/signer";
 import { stringify as stringifyYaml } from "yaml";
 import { loadConfig, resolveChain } from "../config/store.ts";
 import { primaryRpc } from "../config/types.ts";
-import { resolveAccountSigner, toSs58 } from "../core/accounts.ts";
+import { resolveAccountSigner, resolveAccountV5Signer, toSs58 } from "../core/accounts.ts";
 import { type ClientHandle, createChainClient } from "../core/client.ts";
 import { papiLink, pjsAppsLink } from "../core/explorers.ts";
+import { assembleV5General, checkV5SignedCapability } from "../core/extrinsic-v5.ts";
 import type { Lookup, MetadataBundle } from "../core/metadata.ts";
 import {
   describeCallArgs,
@@ -167,6 +169,7 @@ export async function handleTx(
     tip?: string;
     mortality?: string;
     at?: string;
+    v5?: boolean;
     /** Pre-parsed args from a file (skip CLI string parsing, still normalize) */
     parsedArgs?: unknown;
   },
@@ -246,6 +249,15 @@ export async function handleTx(
     return;
   }
 
+  if (opts.v5 && opts.unsigned) {
+    throw new Error(
+      "--v5 and --unsigned are mutually exclusive (--unsigned already emits a v5 general transaction)",
+    );
+  }
+  if (opts.v5 && !opts.from) {
+    throw new Error("--v5 requires --from (it selects how the transaction is signed)");
+  }
+
   if (!opts.from && !opts.unsigned && !opts.encode && !opts.toYaml && !opts.toJson) {
     if (isRawCall) {
       throw new Error(
@@ -302,7 +314,12 @@ export async function handleTx(
   const { name: chainName, chain: chainConfig } = resolveChain(config, effectiveChain);
 
   const decodeOnly = opts.encode || opts.toYaml || opts.toJson;
-  const signer = decodeOnly || opts.unsigned ? undefined : await resolveAccountSigner(opts.from!);
+  const signer =
+    decodeOnly || opts.unsigned
+      ? undefined
+      : opts.v5
+        ? await resolveAccountV5Signer(opts.from!)
+        : await resolveAccountSigner(opts.from!);
 
   let clientHandle: ClientHandle | undefined;
 
@@ -335,6 +352,25 @@ export async function handleTx(
 
     if (!decodeOnly || opts.unsigned) {
       const userExtOverrides = parseExtOption(opts.ext);
+
+      // v5 General signing is capability-gated: refuse up front when the
+      // chain can't authorize it, instead of letting the runtime reject the
+      // submission with UnknownOrigin.
+      if (opts.v5) {
+        const cap = checkV5SignedCapability(meta);
+        if (!cap.ok) {
+          throw new CliError(
+            `--v5: this chain can't accept signed v5 transactions — ${cap.reason}. ` +
+              "Drop --v5 to sign a v4 transaction.",
+          );
+        }
+        if (cap.authIdentifier in userExtOverrides) {
+          throw new CliError(
+            `--ext override for ${cap.authIdentifier} conflicts with --v5 — ` +
+              "that extension carries the v5 signature.",
+          );
+        }
+      }
 
       // When --asset is specified, handle ChargeAssetTxPayment as a custom extension
       // instead of letting PAPI handle it. PAPI's built-in path runs
@@ -464,7 +500,9 @@ export async function handleTx(
         estimatedFees = String(
           await withStalenessSuggestion(chainName, clientHandle!, () =>
             withBlockAvailabilityHint(opts.at, () =>
-              tx.getEstimatedFees(signer?.publicKey, txOptions),
+              opts.v5
+                ? estimateV5Fees(clientHandle!, meta, tx, signer!, txOptions)
+                : tx.getEstimatedFees(signer?.publicKey, txOptions),
             ),
           ),
         );
@@ -476,6 +514,7 @@ export async function handleTx(
         const result: Record<string, unknown> = {
           chain: chainName,
           from: { name: opts.from, address: signerAddress },
+          ...(opts.v5 ? { v5: true } : {}),
           callHex,
           decoded: decodedStr,
           estimatedFees,
@@ -493,6 +532,7 @@ export async function handleTx(
 
       console.log(`  ${BOLD}Chain:${RESET}  ${chainName}`);
       console.log(`  ${BOLD}From:${RESET}   ${opts.from} (${signerAddress})`);
+      if (opts.v5) console.log(`  ${BOLD}Type:${RESET}   signed (v5 general)`);
       console.log(`  ${BOLD}Call:${RESET}   ${callHex}`);
       printDecodedCall(decodedObj, decodedStr);
       if (nonce !== undefined) console.log(`  ${BOLD}Nonce:${RESET} ${nonce}`);
@@ -665,6 +705,7 @@ export async function handleTx(
       }
       printJsonLine({
         event: result.type === "finalized" ? "finalized" : "bestBlock",
+        ...(opts.v5 ? { v5: true } : {}),
         blockNumber: result.block.number,
         blockHash,
         txHash: result.txHash,
@@ -693,6 +734,7 @@ export async function handleTx(
 
     console.log();
     console.log(`  ${BOLD}Chain:${RESET}  ${chainName}`);
+    if (opts.v5) console.log(`  ${BOLD}Type:${RESET}   signed (v5 general)`);
     console.log(`  ${BOLD}Call:${RESET}   ${callHex}`);
     printDecodedCall(decodedObj, decodedStr);
     if (nonce !== undefined) console.log(`  ${BOLD}Nonce:${RESET} ${nonce}`);
@@ -754,6 +796,33 @@ export async function handleTx(
   } finally {
     clientHandle?.destroy();
   }
+}
+
+/**
+ * Fee estimation for the v5 path. papi's `tx.getEstimatedFees` signs with an
+ * internal fake v4 signer (ignoring ours), which produces the wrong byte
+ * layout for a v5 General transaction — so sign for real and ask the runtime
+ * directly via `TransactionPaymentApi_query_info`.
+ */
+async function estimateV5Fees(
+  clientHandle: ClientHandle,
+  meta: MetadataBundle,
+  tx: any,
+  signer: PolkadotSigner,
+  txOptions: Record<string, any> | undefined,
+): Promise<bigint> {
+  const encoded: Uint8Array = await tx.sign(signer, txOptions);
+  const args = new Uint8Array(encoded.length + 4);
+  args.set(encoded, 0);
+  args.set(u32.enc(encoded.length), encoded.length);
+  const resultHex = await clientHandle.client._request<string>("state_call", [
+    "TransactionPaymentApi_query_info",
+    Binary.toHex(args),
+  ]);
+  const info = meta.builder
+    .buildRuntimeCall("TransactionPaymentApi", "query_info")
+    .value.dec(resultHex);
+  return info.partial_fee;
 }
 
 function formatDispatchError(err: { type: string; value?: unknown }): string {
@@ -1733,38 +1802,7 @@ function buildGeneralTx(
     extBytes.push(codec.enc(value));
   }
 
-  // Assemble: 0x45 | ext_version | ext_extras | call_data
-  const extVersion = new Uint8Array([extensionVersion]);
-  const versionByte = new Uint8Array([0x45]);
-
-  // Calculate total payload length
-  let payloadLen = 1 + 1; // version byte + ext version
-  for (const b of extBytes) payloadLen += b.length;
-  payloadLen += callData.length;
-
-  const lengthPrefix = scaleCompact.enc(payloadLen);
-
-  // Concatenate all parts
-  const total = new Uint8Array(lengthPrefix.length + payloadLen);
-  let offset = 0;
-
-  total.set(lengthPrefix, offset);
-  offset += lengthPrefix.length;
-
-  total.set(versionByte, offset);
-  offset += 1;
-
-  total.set(extVersion, offset);
-  offset += 1;
-
-  for (const b of extBytes) {
-    total.set(b, offset);
-    offset += b.length;
-  }
-
-  total.set(callData, offset);
-
-  return total;
+  return assembleV5General(extensionVersion, extBytes, callData);
 }
 
 // --- Progressive transaction tracking ---
