@@ -1130,7 +1130,7 @@ List the transaction extensions (also known as signed extensions) a chain declar
 # List all transaction extensions on a chain
 dot polkadot.extensions
 # Output:
-# Transaction extensions on polkadot (11)
+# Transaction extensions on polkadot (11, extension version 0)
 #
 #   AuthorizeCall              unknown               [custom]
 #   ChargeTransactionPayment   Compact<u128>         [builtin]

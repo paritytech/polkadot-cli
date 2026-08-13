@@ -15,6 +15,8 @@ import {
   getRuntimeApiNames,
   getSignedExtensionNames,
   getSignedExtensions,
+  getTransactionExtensionVersion,
+  getTransactionExtensionVersions,
   listPallets,
   parseMetadata,
 } from "../core/metadata.ts";
@@ -775,6 +777,8 @@ export async function handleExtensions(
   const meta = await loadMeta(chainName, chainConfig, opts.rpc);
 
   if (!target) {
+    const extensionVersion = getTransactionExtensionVersion(meta);
+    const availableVersions = getTransactionExtensionVersions(meta);
     const extensions = getSignedExtensions(meta)
       .map((e) => describeSignedExtension(meta, e))
       .sort((a, b) => a.identifier.localeCompare(b.identifier));
@@ -783,6 +787,8 @@ export async function handleExtensions(
       console.log(
         formatJson({
           chain: chainName,
+          extensionVersion,
+          availableVersions,
           extensions: extensions.map((e) => ({
             identifier: e.identifier,
             valueType: e.valueType,
@@ -794,7 +800,11 @@ export async function handleExtensions(
       return;
     }
 
-    printHeading(`Transaction extensions on ${chainName} (${extensions.length})`);
+    const versionNote =
+      availableVersions.length > 1
+        ? `extension version ${extensionVersion} of {${availableVersions.join(", ")}}`
+        : `extension version ${extensionVersion}`;
+    printHeading(`Transaction extensions on ${chainName} (${extensions.length}, ${versionNote})`);
     for (const e of extensions) {
       const tag = e.isBuiltin ? `${DIM}[builtin]${RESET}` : `${CYAN}[custom]${RESET}`;
       printItem(e.identifier, `${e.valueType}  ${tag}`);

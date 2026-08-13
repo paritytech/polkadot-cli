@@ -456,12 +456,38 @@ export const PAPI_BUILTIN_EXTENSIONS: ReadonlySet<string> = new Set([
   "PrevalidateAttests",
 ]);
 
-export function getSignedExtensions(meta: MetadataBundle): SignedExtensionInfo[] {
-  const byVersion = meta.unified.extrinsic.signedExtensions;
-  // Use the first (and typically only) version key
-  const versionKeys = Object.keys(byVersion);
-  if (versionKeys.length === 0) return [];
-  return byVersion[Number(versionKeys[0])] ?? [];
+/**
+ * Keys of the transaction-extension version map, ascending. The map is keyed
+ * by transaction-extension (pipeline) version, NOT extrinsic version — the
+ * frame-metadata v16 doc comment says "extrinsic versions" and is wrong: v4
+ * Signed extrinsics always use pipeline version 0, and only v5 General
+ * extrinsics carry an explicit extension-version byte. v14/v15 metadata
+ * expose exactly one entry, keyed 0.
+ */
+export function getTransactionExtensionVersions(meta: MetadataBundle): number[] {
+  return Object.keys(meta.unified.extrinsic.signedExtensions)
+    .map(Number)
+    .filter(Number.isInteger)
+    .sort((a, b) => a - b);
+}
+
+/**
+ * The transaction-extension version to encode with: the highest key in the
+ * map, matching subxt's transaction_extension_version_to_use_for_encoding.
+ * Every live chain exposes exactly {0} today; this matters the day one
+ * doesn't. Null when the map is empty.
+ */
+export function getTransactionExtensionVersion(meta: MetadataBundle): number | null {
+  const versions = getTransactionExtensionVersions(meta);
+  return versions.length > 0 ? versions[versions.length - 1]! : null;
+}
+
+export function getSignedExtensions(meta: MetadataBundle, version?: number): SignedExtensionInfo[] {
+  const chosen = version ?? getTransactionExtensionVersion(meta);
+  if (chosen === null) return [];
+  // Metadata order is normative — signing payloads encode extensions in
+  // exactly this order, so never sort or normalise it.
+  return meta.unified.extrinsic.signedExtensions[chosen] ?? [];
 }
 
 export function getSignedExtensionNames(meta: MetadataBundle): string[] {
