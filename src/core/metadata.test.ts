@@ -1,11 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { getTestMetadata } from "../commands/__fixtures__/load-metadata.ts";
-import { MetadataError } from "../utils/errors.ts";
 import {
+  getTestMetadata,
+  getTestMetadataRaw,
+  getTestMetadataV16,
+} from "../commands/__fixtures__/load-metadata.ts";
+import { MetadataError } from "../utils/errors.ts";
+import type { RuntimeFingerprint } from "../utils/runtime-fingerprint.ts";
+import {
+  CLIENT_MAX_METADATA_VERSION,
   describeCallArgs,
   describeRuntimeApiMethodArgs,
   describeSignedExtension,
   describeType,
+  fetchMetadataAtVersion,
   findPallet,
   findRuntimeApi,
   findSignedExtension,
@@ -18,8 +25,11 @@ import {
   listPallets,
   listRuntimeApis,
   type MetadataBundle,
+  negotiateMetadataVersions,
   PAPI_BUILTIN_EXTENSIONS,
   parseMetadata,
+  peekMetadataVersion,
+  shouldRefreshCachedMetadata,
 } from "./metadata.ts";
 
 const meta: MetadataBundle = getTestMetadata();
@@ -465,5 +475,161 @@ describe("MetadataBundle.version", () => {
 
   test("test fixture is v15", () => {
     expect(meta.version).toBe(15);
+  });
+
+  test("v16 fixture parses to the same surface as v15", () => {
+    // The fixtures are snapshots of different runtime releases, so counts may
+    // differ — assert the v16 shape exposes each surface, not exact equality.
+    const v16 = getTestMetadataV16();
+    expect(v16.version).toBe(16);
+    expect(getPalletNames(v16)).toContain("System");
+    expect(getSignedExtensionNames(v16)).toContain("CheckNonce");
+    expect(listRuntimeApis(v16).length).toBeGreaterThan(0);
+  });
+
+  test("v16 metadata reports both extrinsic versions", () => {
+    const v16 = getTestMetadataV16();
+    const versions = (v16.unified.extrinsic as any).version;
+    // v15 collapses this to the minimum supported version; v16 lists them all.
+    expect([versions].flat()).toEqual([4, 5]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// peekMetadataVersion
+// ---------------------------------------------------------------------------
+
+describe("peekMetadataVersion", () => {
+  test("reads the version byte from real blobs", () => {
+    expect(peekMetadataVersion(getTestMetadataRaw())).toBe(15);
+  });
+
+  test("rejects bytes without the meta magic", () => {
+    expect(peekMetadataVersion(new Uint8Array([1, 2, 3, 4, 5, 6]))).toBeNull();
+  });
+
+  test("rejects blobs shorter than magic + version", () => {
+    expect(peekMetadataVersion(new Uint8Array([0x6d, 0x65, 0x74, 0x61]))).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// shouldRefreshCachedMetadata
+// ---------------------------------------------------------------------------
+
+function fp(chainSupportedVersions?: number[]): RuntimeFingerprint {
+  return {
+    specName: "test",
+    specVersion: 1,
+    transactionVersion: 1,
+    implName: "test",
+    implVersion: 0,
+    authoringVersion: 0,
+    codeHash: "0x00",
+    fetchedAt: "2026-01-01T00:00:00.000Z",
+    ...(chainSupportedVersions ? { chainSupportedVersions } : {}),
+  };
+}
+
+describe("shouldRefreshCachedMetadata", () => {
+  test("missing sidecar means unknown provenance — refresh", () => {
+    expect(shouldRefreshCachedMetadata(15, null)).toBe(true);
+  });
+
+  test("pre-negotiation sidecar (no chainSupportedVersions) — refresh", () => {
+    expect(shouldRefreshCachedMetadata(15, fp())).toBe(true);
+  });
+
+  test("blob below the chain's best supported version — refresh", () => {
+    expect(shouldRefreshCachedMetadata(15, fp([14, 15, 16]))).toBe(true);
+  });
+
+  test("blob already at the negotiated target — keep", () => {
+    expect(shouldRefreshCachedMetadata(16, fp([14, 15, 16]))).toBe(false);
+  });
+
+  test("chain that only serves up to v15 — keep a v15 blob", () => {
+    expect(shouldRefreshCachedMetadata(15, fp([14, 15]))).toBe(false);
+  });
+
+  test("chain versions above the client ceiling are capped", () => {
+    // A future chain offering v17 must not force a refetch loop on a client
+    // that can only decode up to CLIENT_MAX_METADATA_VERSION.
+    expect(shouldRefreshCachedMetadata(CLIENT_MAX_METADATA_VERSION, fp([14, 15, 16, 17]))).toBe(
+      false,
+    );
+  });
+
+  test("undecodable blob — refresh", () => {
+    expect(shouldRefreshCachedMetadata(null, fp([14, 15, 16]))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// negotiateMetadataVersions / fetchMetadataAtVersion (fake RPC)
+// ---------------------------------------------------------------------------
+
+function fakeClientHandle(handler: (method: string, params: unknown[]) => string) {
+  return {
+    client: {
+      _request: async (method: string, params: unknown[]) => handler(method, params),
+    },
+    destroy: () => {},
+  } as any;
+}
+
+describe("negotiateMetadataVersions", () => {
+  const encodeU32s = (nums: number[]) => {
+    const compactLen = new Uint8Array([nums.length << 2]);
+    const words = new Uint8Array(nums.length * 4);
+    const dv = new DataView(words.buffer);
+    for (const [i, n] of nums.entries()) dv.setUint32(i * 4, n, true);
+    const out = new Uint8Array(1 + words.length);
+    out.set(compactLen, 0);
+    out.set(words, 1);
+    return `0x${Buffer.from(out).toString("hex")}`;
+  };
+
+  test("filters to the supported window and drops the unstable sentinel", async () => {
+    const handle = fakeClientHandle(() => encodeU32s([14, 15, 16, 0xffffffff]));
+    expect(await negotiateMetadataVersions(handle, "test")).toEqual([14, 15, 16]);
+  });
+
+  test("falls back to [14] when the runtime lacks the API", async () => {
+    const handle = fakeClientHandle(() => {
+      throw new Error("Method not found");
+    });
+    expect(await negotiateMetadataVersions(handle, "test")).toEqual([14]);
+  });
+
+  test("falls back to [14] when every version is outside the window", async () => {
+    const handle = fakeClientHandle(() => encodeU32s([0xffffffff]));
+    expect(await negotiateMetadataVersions(handle, "test")).toEqual([14]);
+  });
+});
+
+describe("fetchMetadataAtVersion", () => {
+  test("decodes Some(bytes)", async () => {
+    // Option::Some(0x01) + compact length + opaque bytes
+    const blob = getTestMetadataRaw().slice(0, 8);
+    const compactLen = new Uint8Array([blob.length << 2]);
+    const payload = new Uint8Array([1, ...compactLen, ...blob]);
+    const handle = fakeClientHandle((method) => {
+      expect(method).toBe("state_call");
+      return `0x${Buffer.from(payload).toString("hex")}`;
+    });
+    expect(await fetchMetadataAtVersion(handle, "test", 16)).toEqual(blob);
+  });
+
+  test("returns undefined for None", async () => {
+    const handle = fakeClientHandle(() => "0x00");
+    expect(await fetchMetadataAtVersion(handle, "test", 99)).toBeUndefined();
+  });
+
+  test("returns undefined on RPC error", async () => {
+    const handle = fakeClientHandle(() => {
+      throw new Error("boom");
+    });
+    expect(await fetchMetadataAtVersion(handle, "test", 16)).toBeUndefined();
   });
 });

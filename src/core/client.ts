@@ -1,6 +1,6 @@
 import { createClient } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws";
-import { loadMetadata, saveMetadata } from "../config/store.ts";
+import { loadMetadata } from "../config/store.ts";
 import type { ChainConfig } from "../config/types.ts";
 import { ConnectionError } from "../utils/errors.ts";
 
@@ -53,9 +53,12 @@ export async function createChainClient(
 
   const client = createClient(provider, {
     getMetadata: async () => loadMetadata(chainName),
-    setMetadata: async (_codeHash, metadata) => {
-      await saveMetadata(chainName, metadata);
-    },
+    // Deliberately not persisted: polkadot-api negotiates its own metadata
+    // version and would overwrite the CLI-managed cache without writing the
+    // fingerprint sidecar, so which version sat in the cache depended on
+    // command history. fetchMetadataFromChain is the only writer; papi keeps
+    // its fetched copy in memory for the session.
+    setMetadata: async () => {},
   });
 
   return {
