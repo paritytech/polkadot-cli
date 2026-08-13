@@ -342,21 +342,13 @@ export async function handleTx(
       // check rejects with "Incompatible runtime asset" even with fresh metadata.
       // Bypassing it lets us SCALE-encode the asset directly via the metadata
       // builder.
-      const skipBuiltins =
-        asset !== undefined
-          ? new Set([...PAPI_BUILTIN_EXTENSIONS].filter((e) => e !== "ChargeAssetTxPayment"))
-          : PAPI_BUILTIN_EXTENSIONS;
       if (asset !== undefined) {
         userExtOverrides.ChargeAssetTxPayment ??= {
           value: { tip: tip ?? 0n, asset_id: asset },
         };
       }
 
-      const customSignedExtensions = buildCustomSignedExtensions(
-        meta,
-        userExtOverrides,
-        skipBuiltins,
-      );
+      const customSignedExtensions = buildCustomSignedExtensions(meta, userExtOverrides);
 
       const built: Record<string, any> = {};
       if (Object.keys(customSignedExtensions).length > 0)
@@ -1565,19 +1557,30 @@ const NO_DEFAULT = Symbol("no-default");
 function buildCustomSignedExtensions(
   meta: MetadataBundle,
   userOverrides: Record<string, any>,
-  builtins: ReadonlySet<string> = PAPI_BUILTIN_EXTENSIONS,
 ): Record<string, { value?: any; additionalSigned?: any }> {
   const result: Record<string, { value?: any; additionalSigned?: any }> = {};
   const extensions = getSignedExtensions(meta);
 
-  for (const ext of extensions) {
-    if (builtins.has(ext.identifier)) continue;
+  const known = new Set(extensions.map((e) => e.identifier));
+  for (const name of Object.keys(userOverrides)) {
+    if (!known.has(name)) {
+      throw new Error(
+        `Unknown transaction extension "${name}" — this chain's extensions: ` +
+          [...known].join(", "),
+      );
+    }
+  }
 
-    // User override takes priority
+  for (const ext of extensions) {
+    // User override takes priority, even over extensions polkadot-api
+    // fills in itself (e.g. CheckMetadataHash) — papi checks
+    // customSignedExtensions before its own builtin handling.
     if (ext.identifier in userOverrides) {
       result[ext.identifier] = userOverrides[ext.identifier];
       continue;
     }
+
+    if (PAPI_BUILTIN_EXTENSIONS.has(ext.identifier)) continue;
 
     // Auto-default based on type structure
     const valueEntry = meta.lookup(ext.type);
@@ -1599,6 +1602,9 @@ function buildCustomSignedExtensions(
 }
 
 function autoDefaultForType(entry: any): any {
+  // Raw Uint8Array relies on papi 2.x passing it through unencoded
+  // (sign-extensions "input instanceof Uint8Array" branch); papi 3.0 drops
+  // that branch, so on migration void types must become decoded values.
   if (entry.type === "void") return new Uint8Array([]);
   // Option<T> → undefined tells polkadot-api to encode as None (0x00)
   if (entry.type === "option") return undefined;
