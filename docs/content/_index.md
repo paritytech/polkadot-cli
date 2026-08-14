@@ -2,6 +2,13 @@
 
 A command-line tool for interacting with Polkadot-ecosystem chains. Manage chains and accounts, query storage, look up constants, inspect metadata, submit extrinsics, and compute hashes — all from your terminal. [View on GitHub](https://github.com/paritytech/polkadot-cli).
 
+<div class="tape-hero">
+<video autoplay loop muted playsinline aria-label="Querying Polkadot and Asset Hub with no endpoint or config">
+  <source src="vhs/hero.webm" type="video/webm">
+  <source src="vhs/hero.mp4" type="video/mp4">
+</video>
+</div>
+
 ## Features
 
 - ✅ Same syntax as [polkadot-api](https://papi.how) (PAPI)
@@ -407,6 +414,11 @@ With `--json` the output is structured — `{ action, added, overwritten, skippe
 ## Accounts
 
 Manage signing accounts. Dev accounts (Alice, Bob, Charlie, Dave, Eve, Ferdie) are always available on testnets — no import needed.
+
+<video autoplay loop muted playsinline aria-label="Creating a key, naming a watch-only address, deriving a child, and querying by name">
+  <source src="vhs/accounts.webm" type="video/webm">
+  <source src="vhs/accounts.mp4" type="video/mp4">
+</video>
 
 ### List accounts
 
@@ -1072,6 +1084,11 @@ The chain is required: pass it with `--chain` or as a prefix on the inspect targ
 
 Output is **width-aware**: short type signatures stay on a single line, long ones expand across multiple lines with field names aligned by colon. Composite struct fields and call arguments are color-coded (cyan field names, yellow primitives, magenta container keywords like `Vec`/`Option`, green enum variants) when stdout is a TTY; piped output stays plain.
 
+<video autoplay loop muted playsinline aria-label="Inspecting storage, calls, events and errors from cached metadata">
+  <source src="vhs/inspect.webm" type="video/webm">
+  <source src="vhs/inspect.mp4" type="video/mp4">
+</video>
+
 ```
 # Pallet detail — list storage, constants, calls, events, errors
 dot inspect polkadot.System
@@ -1569,6 +1586,11 @@ The `rpc` category is **flat** — there's no pallet level. The form is `[chain.
 ## Transactions
 
 Build, sign, and submit extrinsics using dot-path syntax: `dot tx.Pallet.Call`. Pass arguments after the dot-path, or submit a raw SCALE-encoded call hex. Both forms display a decoded human-readable representation of the call.
+
+<video autoplay loop muted playsinline aria-label="Dry-running then submitting a transfer on Paseo Asset Hub, with events and explorer links">
+  <source src="vhs/submit.webm" type="video/webm">
+  <source src="vhs/submit.mp4" type="video/mp4">
+</video>
 
 ### Basic usage
 
@@ -2617,6 +2639,11 @@ Run `dot verifiable` with no arguments to see the full action/option list and th
 
 Generate shell completion scripts for tab-completing subcommands, chain names, pallet names, and item names. Completions use cached metadata — no network calls are made.
 
+<video autoplay loop muted playsinline aria-label="Tab-completing a chain, pallet, storage item, call and account name">
+  <source src="vhs/completions.webm" type="video/webm">
+  <source src="vhs/completions.mp4" type="video/mp4">
+</video>
+
 ### Setup
 
 ```
@@ -2747,6 +2774,11 @@ These flags work with any command:
 
 Every command supports `--json` for machine-readable output. This works on data queries, metadata inspection, account management, chain configuration, and transaction submission:
 
+<video autoplay loop muted playsinline aria-label="Piping --json and a full --dump storage map into jq">
+  <source src="vhs/jq.webm" type="video/webm">
+  <source src="vhs/jq.mp4" type="video/mp4">
+</video>
+
 ```
 dot inspect polkadot --json                           # All pallets as JSON
 dot inspect polkadot.Balances --json                  # Pallet detail with storage, constants, calls, events, errors
@@ -2840,6 +2872,11 @@ Metadata is fetched at the highest version both the chain and the CLI support (n
 
 Create a self-contained, per-directory setup for chains and accounts. A workspace is just a `.polkadot/` directory that `dot` discovers automatically:
 
+<video autoplay loop muted playsinline aria-label="Initializing a workspace, creating an account in it, and losing it on the way out">
+  <source src="vhs/workspaces.webm" type="video/webm">
+  <source src="vhs/workspaces.mp4" type="video/mp4">
+</video>
+
 ```bash
 mkdir -p ~/dot/paseo && cd ~/dot/paseo
 dot init
@@ -2863,7 +2900,61 @@ dot which
 
 **Full isolation:** while a workspace is active, the global config is invisible. An account named `sudo` in `~/dot/paseo` and one in `~/dot/mytestnet` are unrelated identities — lookups never fall back to the global config, and resolution errors name the config root that was searched, so running in the wrong directory self-diagnoses. Built-in chains (Polkadot, Paseo, and the system parachains) still work everywhere; they ship with the binary.
 
-`dot init` is deliberately minimal: it creates an empty `.polkadot/` directory and nothing else. It refuses to run in `$HOME`, errors if the directory already has a workspace, and warns when the new workspace shadows a parent workspace or when a set `DOT_HOME` masks discovery. Nothing is copied from the global config, and no `.gitignore` is written — whether to commit or ignore a workspace (remember: `accounts.json` holds plain-text secrets) is your decision to make.
+`dot init` is deliberately minimal: it creates an empty `.polkadot/` directory and nothing else. It refuses to run in `$HOME`, errors if the directory already has a workspace, and warns when the new workspace shadows a parent workspace or when a set `DOT_HOME` masks discovery. Nothing is copied from the global config, and no `.gitignore` is written — see Committing a workspace below for what is safe to track.
+
+#### Committing a workspace
+
+A workspace is worth committing: it pins the chains a repo talks to, so a clone becomes a working setup. Commit it per file, though, not wholesale.
+
+| Path | Commit | Why |
+|---|---|---|
+| `.polkadot/config.json` | yes | The chains and their RPC endpoints — the reason to share a workspace at all. |
+| `.polkadot/accounts.json` | only under the rule below | Safe while every entry is env-backed or watch-only; plain-text key material otherwise. |
+| `.polkadot/chains/` | no | Regenerable metadata cache: ~450 KB of binary per chain, rewritten by every runtime upgrade. `dot chain update <chain>` refetches it. |
+| `.polkadot/update-check.json` | no | Update-notifier timestamp, rewritten as you work. |
+
+```
+# .gitignore — secrets and regenerable caches
+.env
+.polkadot/chains/
+.polkadot/update-check.json
+```
+
+**The `accounts.json` rule.** Commit it only while every entry is either **env-backed** (`--env`) or **watch-only** (an address with no secret). Those entries record a variable name or a public key, never key material:
+
+```
+{ "name": "ci-signer", "secret": { "env": "DOT_CI_SIGNER" }, "publicKey": "0x3a3d45…" }
+```
+
+That invariant is a property of the file's current contents, not of the format — a later `dot account create` or `dot account add --secret` in the same directory writes a mnemonic into the same tracked file. Assert it in CI or a pre-commit hook:
+
+```
+# Fails if any account carries an inline secret rather than an env reference.
+jq -e '[.accounts[].secret | select(type == "string")] | length == 0' .polkadot/accounts.json
+```
+
+**`dot` does not read `.env` files.** The CLI reads environment variables, and nothing else — a `.env` sitting next to `.polkadot/` has no effect on its own. Load it yourself:
+
+```
+set -a; source .env; set +a     # or direnv, or `dotenvx run -- dot …`
+dot sign "release v1.2.3" --from ci-signer
+```
+
+**In CI, skip `.env` entirely** and let the runner's secret store supply the variable. The account can even be defined on a machine that never holds the secret — `dot account add` records an empty public key and reports `Address will resolve when $DOT_CI_SIGNER is set.`:
+
+```
+# .github/workflows/release.yml
+- run: npm install -g polkadot-cli@latest
+- run: dot chain update paseo-asset-hub          # the cache is not committed
+- run: dot paseo-asset-hub.tx.System.remark 0xdeadbeef --from ci-signer
+  env:
+    DOT_CI_SIGNER: ${{ secrets.DOT_CI_SIGNER }}
+```
+
+<video autoplay loop muted playsinline aria-label="An env-backed signer: the workspace stores a variable name, and nothing signs without it">
+  <source src="vhs/env-accounts.webm" type="video/webm">
+  <source src="vhs/env-accounts.mp4" type="video/mp4">
+</video>
 
 **Throwaway sessions** are just disposable workspaces:
 

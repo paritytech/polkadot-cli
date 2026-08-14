@@ -6,7 +6,10 @@ _dot_completions() {
   emulate -L zsh
   local -a completions
   local current_word="\${words[CURRENT]}"
-  local preceding=("\${words[2,CURRENT-1]}")
+  # (@) keeps each preceding word separate — a quoted subscript range without it
+  # joins them into one argument, which hides the flag from the completer and
+  # breaks value completion for \`--from\` / \`--chain\`.
+  local preceding=("\${(@)words[2,CURRENT-1]}")
 
   # Build args: -- <current_word> <preceding_words...>
   local args=("__complete" "--" "\${current_word}")

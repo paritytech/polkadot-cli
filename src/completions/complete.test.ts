@@ -735,6 +735,14 @@ describe("completions command — shell scripts", () => {
     expect(stdout).not.toContain("words[@]:1:");
   });
 
+  test("zsh script passes preceding words as separate arguments", async () => {
+    // Without the (@) flag the quoted range collapses into a single argument,
+    // so the completer never sees the `--from` / `--chain` it needs to offer
+    // values for once anything else precedes the flag on the line.
+    const { stdout } = await runCli(["completions", "zsh"]);
+    expect(stdout).toContain("(@)words[2,CURRENT-1]");
+  });
+
   test("bash script always calls compopt -o nospace", async () => {
     const { stdout } = await runCli(["completions", "bash"]);
     expect(stdout).toContain("compopt -o nospace");

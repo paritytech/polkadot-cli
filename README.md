@@ -7,6 +7,8 @@ A command-line tool for interacting with Polkadot-ecosystem chains. Manage chain
 
 Ships with Polkadot and all system parachains preconfigured with multiple fallback RPC endpoints. Add any Substrate-based chain by pointing to its RPC endpoint(s).
 
+![Querying Polkadot and Asset Hub with no endpoint or config](docs/static/vhs/hero.gif)
+
 ## Features
 
 - ✅ Same syntax as [polkadot-api](https://papi.how) (PAPI)
@@ -312,6 +314,8 @@ Running `dot chain import` with no file path prints the subcommand help instead 
 ### Manage accounts
 
 Dev accounts (Alice, Bob, Charlie, Dave, Eve, Ferdie) are always available for testnets. Create or import your own accounts for any chain.
+
+![Creating a key, naming a watch-only address, deriving a child, and querying by name](docs/static/vhs/accounts.gif)
 
 > **Security warning:** Account secrets (mnemonics and seeds) are currently stored **unencrypted** in `~/.polkadot/accounts.json`. Do not use this for high-value accounts on mainnet. Encrypted storage is planned for a future release. Use `--env` to keep secrets off disk entirely.
 
@@ -837,6 +841,8 @@ Works offline from cached metadata after the first fetch. The chain is required.
 
 Output is **width-aware**: short type signatures stay on a single line, longer ones expand across multiple lines with field names aligned. Composite struct fields, enum variants, and call arguments are color-coded (cyan field names, yellow primitives, magenta container keywords like `Vec`/`Option`, green enum variants) when stdout is a TTY; piped output stays plain.
 
+![Inspecting storage, calls, events and errors from cached metadata](docs/static/vhs/inspect.gif)
+
 ```bash
 # Pallet detail — list storage, constants, calls, events, and errors
 dot inspect polkadot.System
@@ -1237,6 +1243,8 @@ The `rpc` category is **flat** — there's no pallet level. The form is `[chain.
 ### Submit extrinsics
 
 Build, sign, and submit transactions. Pass a `Pallet.Call` with arguments, or a raw SCALE-encoded call hex (e.g. from a multisig proposal or governance). Both forms display a decoded human-readable representation of the call.
+
+![Dry-running then submitting a transfer on Paseo Asset Hub, with events and explorer links](docs/static/vhs/submit.gif)
 
 ```bash
 # Estimate fees without submitting (no broadcast). The Decode block shows
@@ -2089,6 +2097,8 @@ dot polkadot.tx.System.remark 0xdead   # shows call help (no error)
 
 Every command supports `--json` for machine-readable output. This works on data queries, metadata inspection, account management, chain configuration, and transaction submission:
 
+![Piping --json and a full --dump storage map into jq](docs/static/vhs/jq.gif)
+
 ```bash
 dot inspect polkadot --json                           # All pallets as JSON
 dot inspect polkadot.Balances --json                  # Pallet detail with storage, constants, calls, events, errors
@@ -2165,6 +2175,8 @@ dot chain <Tab>          # → add, remove, update, list
 
 Completions are context-aware: `query.` shows pallets with storage items, `tx.` shows pallets with calls, `events.` and `errors.` filter accordingly, `apis.` shows runtime API names. Chain prefix paths like `polkadot.query.System.` work at any depth.
 
+![Tab-completing a chain, pallet, storage item, call and account name](docs/static/vhs/completions.gif)
+
 ## How it compares
 
 | | polkadot-cli | @polkadot/api-cli | subxt-cli | Pop CLI |
@@ -2226,6 +2238,8 @@ Metadata is fetched at the highest version both the chain and the CLI support (n
 
 Create a self-contained, per-directory setup for chains and accounts. A workspace is just a `.polkadot/` directory that `dot` discovers automatically:
 
+![Initializing a workspace, creating an account in it, and losing it on the way out](docs/static/vhs/workspaces.gif)
+
 ```bash
 mkdir -p ~/dot/paseo && cd ~/dot/paseo
 dot init
@@ -2249,7 +2263,58 @@ dot which
 
 **Full isolation:** while a workspace is active, the global config is invisible. An account named `sudo` in `~/dot/paseo` and one in `~/dot/mytestnet` are unrelated identities — lookups never fall back to the global config, and resolution errors name the config root that was searched, so running in the wrong directory self-diagnoses. Built-in chains (Polkadot, Paseo, and the system parachains) still work everywhere; they ship with the binary.
 
-`dot init` is deliberately minimal: it creates an empty `.polkadot/` directory and nothing else. It refuses to run in `$HOME`, errors if the directory already has a workspace, and warns when the new workspace shadows a parent workspace or when a set `DOT_HOME` masks discovery. Nothing is copied from the global config, and no `.gitignore` is written — whether to commit or ignore a workspace (remember: `accounts.json` holds plain-text secrets) is your decision to make.
+`dot init` is deliberately minimal: it creates an empty `.polkadot/` directory and nothing else. It refuses to run in `$HOME`, errors if the directory already has a workspace, and warns when the new workspace shadows a parent workspace or when a set `DOT_HOME` masks discovery. Nothing is copied from the global config, and no `.gitignore` is written — see [Committing a workspace](#committing-a-workspace) for what is safe to track.
+
+#### Committing a workspace
+
+A workspace is worth committing: it pins the chains a repo talks to, so a clone becomes a working setup. Commit it per file, though, not wholesale.
+
+| Path | Commit | Why |
+|---|---|---|
+| `.polkadot/config.json` | yes | The chains and their RPC endpoints — the reason to share a workspace at all. |
+| `.polkadot/accounts.json` | only under the rule below | Safe while every entry is env-backed or watch-only; plain-text key material otherwise. |
+| `.polkadot/chains/` | no | Regenerable metadata cache: ~450 KB of binary per chain, rewritten by every runtime upgrade. `dot chain update <chain>` refetches it. |
+| `.polkadot/update-check.json` | no | Update-notifier timestamp, rewritten as you work. |
+
+```gitignore
+# Secrets and regenerable caches
+.env
+.polkadot/chains/
+.polkadot/update-check.json
+```
+
+**The `accounts.json` rule.** Commit it only while every entry is either **env-backed** (`--env`) or **watch-only** (an address with no secret). Those entries record a variable name or a public key, never key material:
+
+```json
+{ "name": "ci-signer", "secret": { "env": "DOT_CI_SIGNER" }, "publicKey": "0x3a3d45…" }
+```
+
+That invariant is a property of the file's current contents, not of the format — a later `dot account create` or `dot account add --secret` in the same directory writes a mnemonic into the same tracked file. Assert it in CI or a pre-commit hook:
+
+```bash
+# Fails if any account carries an inline secret rather than an env reference.
+jq -e '[.accounts[].secret | select(type == "string")] | length == 0' .polkadot/accounts.json
+```
+
+**`dot` does not read `.env` files.** The CLI reads environment variables, and nothing else — a `.env` sitting next to `.polkadot/` has no effect on its own. Load it yourself:
+
+```bash
+set -a; source .env; set +a     # or direnv, or `dotenvx run -- dot …`
+dot sign "release v1.2.3" --from ci-signer
+```
+
+**In CI, skip `.env` entirely** and let the runner's secret store supply the variable. The account can even be defined on a machine that never holds the secret — `dot account add` records an empty public key and reports `Address will resolve when $DOT_CI_SIGNER is set.`:
+
+```yaml
+# .github/workflows/release.yml
+- run: npm install -g polkadot-cli@latest
+- run: dot chain update paseo-asset-hub          # the cache is not committed
+- run: dot paseo-asset-hub.tx.System.remark 0xdeadbeef --from ci-signer
+  env:
+    DOT_CI_SIGNER: ${{ secrets.DOT_CI_SIGNER }}
+```
+
+![An env-backed signer: the workspace stores a variable name, and nothing signs without it](docs/static/vhs/env-accounts.gif)
 
 **Throwaway sessions** are just disposable workspaces:
 
