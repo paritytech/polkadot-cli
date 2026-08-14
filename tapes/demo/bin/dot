@@ -1,0 +1,6 @@
+#!/bin/sh
+# Recording shim: makes `dot` inside a tape resolve to this checkout's build
+# (dist/cli.mjs — the same artifact npm ships) rather than a global install,
+# so a recording always shows the code it was recorded from.
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec node "$here/../../../dist/cli.mjs" "$@"
