@@ -1,0 +1,26 @@
+# Teleport PAS from Paseo Asset Hub to Bob's account on the Paseo relay chain.
+chain: paseo-asset-hub
+tx:
+  PolkadotXcm:
+    limited_teleport_assets:
+      dest:
+        type: V4
+        value: { parents: 1, interior: { type: Here } }
+      beneficiary:
+        type: V4
+        value:
+          parents: 0
+          interior:
+            type: X1
+            value:
+              - type: AccountId32
+                value:
+                  network: null
+                  id: "0x8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48"
+      assets:
+        type: V4
+        value:
+          - id: { parents: 1, interior: { type: Here } }
+            fun: { type: Fungible, value: ${AMOUNT} }
+      fee_asset_item: 0
+      weight_limit: { type: Unlimited }
