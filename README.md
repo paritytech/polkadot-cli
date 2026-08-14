@@ -123,6 +123,8 @@ Notes:
 
 ### Manage chains
 
+![Listing the preconfigured chains, then adding one by RPC with its parachain ID detected](docs/static/vhs/chains.gif)
+
 ```bash
 # Show chain help
 dot chain               # shows available actions
@@ -1449,6 +1451,10 @@ The check only fires on suspected-stale errors, so the happy path pays no extra 
 
 #### Argument parsing errors
 
+![Fuzzy suggestions for a misspelled pallet, a misspelled storage item, a wrong argument count and an unknown account name](docs/static/vhs/did-you-mean.gif)
+
+Every name the CLI resolves is fuzzy-matched on failure — pallets, storage items, constants, runtime API methods and account names all answer with the candidates they were closest to. A call given the wrong number of arguments answers with its own signature.
+
 When a call argument is invalid, the CLI shows a contextual error message with the argument name, the expected type, and a hint:
 
 ```bash
@@ -1603,6 +1609,8 @@ tx:
 ```
 
 ### File-based commands
+
+![Encoding an XCM teleport from a YAML file with a run-time variable, then the file behind it](docs/static/vhs/xcm-file.gif)
 
 Run any `dot` command from a YAML or JSON file. Especially useful for complex calls like XCM messages that are hard to construct inline.
 
@@ -1878,6 +1886,8 @@ Output shows the crypto type, message bytes in hex, raw signature, and an `Enum`
 Use `--type` to select the signature algorithm (default: `sr25519`). Run `dot sign` with no arguments to see usage and examples.
 
 ### Sovereign accounts (parachain & pallet)
+
+![Deriving a pallet sovereign and both parachain sovereigns, then querying one by name](docs/static/vhs/sovereign.gif)
 
 `dot account add` accepts derivation flags that compute a deterministic sovereign address and store it as a named watch-only account — reusable in `--from` (for `--unsigned` flows), as a tx argument, and in `dot account list`. Runs offline; no chain connection required.
 
@@ -2327,6 +2337,8 @@ cd - && rm -rf "$tmp"        # nothing ever touched ~/.polkadot
 For secrets that should never hit disk at all, combine workspaces with `--env` secret sources (see [Manage accounts](#manage-accounts)).
 
 ### `DOT_DRY_RUN` — force every extrinsic to dry-run
+
+![Simulating a transfer with --dry-run, printing the call bytes with --encode, then DOT_DRY_RUN as a session-wide safety net](docs/static/vhs/dry-run.gif)
 
 Set `DOT_DRY_RUN` to a truthy value (`1`, `true`, `yes`, or `on`, case-insensitive) to make **every** extrinsic-submitting command behave as if `--dry-run` had been passed: the transaction is simulated (call decoded, fees estimated) and **never broadcast**. This is a global safety net for scripts, demos, and CI dry-runs where you want to be sure nothing lands on-chain.
 

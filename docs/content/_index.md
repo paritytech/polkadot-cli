@@ -126,6 +126,11 @@ The layout mirrors [paritytech/product-skills](https://github.com/paritytech/pro
 
 Manage chain connections. Polkadot and all system parachains for both Polkadot and Paseo networks come preconfigured. Add any Substrate-based chain by pointing to its RPC endpoint(s).
 
+<video autoplay loop muted playsinline aria-label="Listing the preconfigured chains, then adding one by RPC with its parachain ID detected">
+  <source src="vhs/chains.webm" type="video/webm">
+  <source src="vhs/chains.mp4" type="video/mp4">
+</video>
+
 ### Preconfigured chains
 
 The following chains are available out of the box — no `dot chain add` needed:
@@ -1844,6 +1849,13 @@ The check only fires on suspected-stale errors, so the happy path pays no extra 
 
 ### Argument parsing errors
 
+<video autoplay loop muted playsinline aria-label="Fuzzy suggestions for a misspelled pallet, a misspelled storage item, a wrong argument count and an unknown account name">
+  <source src="vhs/did-you-mean.webm" type="video/webm">
+  <source src="vhs/did-you-mean.mp4" type="video/mp4">
+</video>
+
+Every name the CLI resolves is fuzzy-matched on failure — pallets, storage items, constants, runtime API methods and account names all answer with the candidates they were closest to. A call given the wrong number of arguments answers with its own signature.
+
 When a call argument is invalid, the CLI shows a contextual error message with the argument name, the expected type, and a hint:
 
 ```
@@ -2030,6 +2042,11 @@ dot ./create-people-collection.yaml --dry-run
 ## File-Based Commands
 
 Run any `dot` command from a YAML or JSON file instead of typing complex arguments inline. This is especially useful for XCM messages and other deeply nested call data.
+
+<video autoplay loop muted playsinline aria-label="Encoding an XCM teleport from a YAML file with a run-time variable, then the file behind it">
+  <source src="vhs/xcm-file.webm" type="video/webm">
+  <source src="vhs/xcm-file.mp4" type="video/mp4">
+</video>
 
 ### File format
 
@@ -2445,6 +2462,11 @@ dot polkadot-people.tx.PeopleLite.attest <candidate> Sr25519(0x...) <ring_vrf_ke
 ## Sovereign Accounts (Parachain & Pallet)
 
 `dot account add` accepts derivation flags that compute a deterministic sovereign address and store it as a named watch-only account — reusable in `--from` (for `--unsigned` flows), as a tx argument, and in `dot account list`. Runs offline — no chain connection required.
+
+<video autoplay loop muted playsinline aria-label="Deriving a pallet sovereign and both parachain sovereigns, then querying one by name">
+  <source src="vhs/sovereign.webm" type="video/webm">
+  <source src="vhs/sovereign.mp4" type="video/mp4">
+</video>
 
 Two kinds of sovereign:
 
@@ -2967,6 +2989,11 @@ cd - && rm -rf "$tmp"        # nothing ever touched ~/.polkadot
 For secrets that should never hit disk at all, combine workspaces with `--env` secret sources.
 
 ### `DOT_DRY_RUN` — force every extrinsic to dry-run
+
+<video autoplay loop muted playsinline aria-label="Simulating a transfer with --dry-run, printing the call bytes with --encode, then DOT_DRY_RUN as a session-wide safety net">
+  <source src="vhs/dry-run.webm" type="video/webm">
+  <source src="vhs/dry-run.mp4" type="video/mp4">
+</video>
 
 Set `DOT_DRY_RUN` to a truthy value (`1`, `true`, `yes`, or `on`, case-insensitive) to make **every** extrinsic-submitting command behave as if `--dry-run` had been passed: the transaction is simulated (call decoded, fees estimated) and **never broadcast**. This is a global safety net for scripts, demos, and CI dry-runs where you want to be sure nothing lands on-chain.
 

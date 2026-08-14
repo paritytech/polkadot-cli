@@ -40,14 +40,17 @@ The order matters: VHS applies settings in sequence and they must all precede th
 ## How a recording is isolated
 
 - **`DOT_HOME=/tmp/dot-demo`** — a recording never reads or writes `~/.polkadot`. The path is short and tidy on purpose: it is visible on screen in any tape that prints the active config root.
+- **Rebuilt before every tape** — `/tmp/dot-demo` is wiped and refilled with just the metadata that tape declares in `tapeChains`, copied from a warm cache at `/tmp/dot-demo-cache`. So `bun run tapes chains` produces the same frames as a full run: no tape inherits the accounts another one created, and `chains.tape` can add a chain that is genuinely not configured yet.
 - **`tapes/demo/bin/dot`** — a shim resolving `dot` to this checkout's `dist/cli.mjs`, so a tape can never accidentally record a globally installed version.
+- **`tapes/demo/files/`** — fixtures for the file-input tapes, `cd`'d into off camera so the recorded command reads the way the docs write it.
 - **`tapes/demo/zdotdir/.zshrc`** — a minimal shell: pink `❯` prompt, no history, no autocorrect, completions loaded, `#` captions treated as comments. Sourced twice over (via `ZDOTDIR` and again from `shell.tape`) so a personal `~/.zshrc` can never leak into a frame.
 - **`DOT_NO_UPDATE_CHECK=1`** — the update notifier must not interrupt a take.
 
 ## Conventions
 
 - **One idea per tape**, 20–30s. A tape that needs a second sentence to explain it should be two tapes.
-- **`Set Height` lives in the tape**, not in `theme.tape`: size the canvas to the tallest screen so the frame has no band of dead black. Everything else — font, colours, width, typing speed — is shared, and overriding any of it needs a reason written in the tape (`submit.tape` drops to `FontSize 16` because its receipt is the widest output in the set).
+- **`Set Height` lives in the tape**, not in `theme.tape`: size the canvas to the tallest screen, then check that its *first* line is still in frame — a `Height` two lines short silently scrolls the command that produced the output off the top. Everything else — font, colours, width, typing speed — is shared, and overriding any of it needs a reason written in the tape (`submit.tape`, `dry-run.tape` and `xcm-file.tape` each drop the font size to stop a call hash or a 32-byte key from wrapping).
+- **End on the tallest screen** where the narrative allows it. The last frame is the one that lingers — in the README GIF between loops, and on the docs page before autoplay starts — so a short closing screen leaves a band of dead black as the lasting impression. `xcm-file.tape` runs its beats in reverse partly for this reason.
 - **Captions are typed shell comments** (`# …`), which is why `INTERACTIVE_COMMENTS` is set. No overlays, no post-production.
 - **Live data.** Tapes query public RPC and show real numbers. Nothing is faked or replayed.
 - **Nothing lands on chain.** Transaction tapes use `--dry-run`. A tape that submits for real must target a testnet with a throwaway account.
@@ -66,15 +69,23 @@ The order matters: VHS applies settings in sequence and they must all precede th
 | `accounts.tape` | Create a key, name a watch-only address, derive a child, then query by name |
 | `jq.tape` | `--json` and a full `--dump` storage map piped into `jq` and aggregated |
 | `env-accounts.tape` | An env-backed signer: the workspace stores a variable name, and nothing signs without it |
+| `dry-run.tape` | `--dry-run`, `--encode`, and `DOT_DRY_RUN` as a session-wide safety net |
+| `chains.tape` | The preconfigured topology, then adding a chain by RPC with its paraId detected |
+| `sovereign.tape` | Pallet and parachain (child / sibling) sovereign addresses derived offline |
+| `xcm-file.tape` | An XCM call encoded from a YAML file, with a variable filled at run time |
+| `did-you-mean.tape` | Fuzzy suggestions for misspelled pallets, items and account names, and a call's arity |
 
 ## Planned
 
-Pitched but not yet recorded, roughly in priority order:
+Pitched but not yet recorded:
 
 | Tape | Shows |
 |---|---|
-| `dry-run` | Decoded call and fee estimate before signing, `--encode`, and the `DOT_DRY_RUN` safety net |
-| `chains` | `dot chain list` topology, adding a chain by RPC, paraID auto-detection, `dot chain info` |
-| `sovereign` | Pallet and parachain sovereign addresses derived in one command |
-| `xcm-file` | A YAML XCM call dry-run from `--file`, with variable substitution |
-| `errors-that-teach` | "Did you mean?" typo suggestions and stale-metadata self-diagnosis |
+| `stale-metadata` | A tx failing on out-of-date metadata and the CLI naming the `dot chain update` to run |
+
+`stale-metadata` is unrecorded on purpose. The suggestion only fires when a call
+fails *and* the cached runtime fingerprint differs from the live chain, so a take
+needs a real runtime upgrade to happen mid-recording, a tampered cache, or a local
+fork with a bumped spec version. The first is not schedulable and the second would
+mean a staged frame, which no other tape here does — so this one waits for a
+chopsticks-based setup that can produce the mismatch honestly.

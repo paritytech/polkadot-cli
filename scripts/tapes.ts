@@ -7,12 +7,13 @@
  *
  * Recordings run against live public RPC, so output differs between takes —
  * that is deliberate, the numbers on screen are real. State lives in a
- * throwaway DOT_HOME (never ~/.polkadot) with metadata pre-fetched, so no take
- * is interrupted by a first-run metadata spinner.
+ * throwaway DOT_HOME (never ~/.polkadot), rebuilt from scratch before each tape
+ * from a shared metadata cache, so no take is interrupted by a first-run
+ * metadata spinner and no tape inherits the previous one's accounts or chains.
  */
 
 import { $ } from "bun";
-import { readdir, mkdir, rm } from "node:fs/promises";
+import { cp, readdir, mkdir, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 const repoRoot = join(import.meta.dir, "..");
@@ -23,8 +24,15 @@ const outDir = join(repoRoot, "docs/static/vhs");
  *  tape that prints the active workspace (`dot chain list`, `dot which`). */
 const demoHome = "/tmp/dot-demo";
 
+/** Metadata cache shared by every take, warmed once. Tapes get a fresh copy of
+ *  the chains they need rather than a shared config root, so recording a subset
+ *  produces the same frames as recording everything. */
+const cacheHome = "/tmp/dot-demo-cache";
+
 /** Chains each tape talks to. Their metadata is cached before recording so no
- *  take is interrupted by a first-fetch spinner. */
+ *  take is interrupted by a first-fetch spinner, and only these chains are
+ *  visible to the tape — an important detail for `chains.tape`, whose whole
+ *  point is a chain that is *not* configured yet. */
 const tapeChains: Record<string, string[]> = {
   hero: ["polkadot", "polkadot-asset-hub"],
   inspect: ["polkadot"],
@@ -32,6 +40,11 @@ const tapeChains: Record<string, string[]> = {
   submit: ["paseo-asset-hub"],
   accounts: ["polkadot-asset-hub"],
   jq: ["polkadot", "polkadot-asset-hub"],
+  "dry-run": ["polkadot-asset-hub"],
+  chains: ["polkadot"], // hydration is added on camera, so must not be cached
+  sovereign: ["polkadot-asset-hub"],
+  "xcm-file": ["paseo-asset-hub"],
+  "did-you-mean": ["polkadot"],
   workspaces: [], // entirely offline: init, which, and a local account
   "env-accounts": [], // offline: account add and message signing
 };
@@ -100,6 +113,7 @@ await mkdir(join(workspaceHome, "paseo"), { recursive: true });
 await mkdir(outDir, { recursive: true });
 
 const cliEnv = { ...process.env, DOT_HOME: demoHome, DOT_NO_UPDATE_CHECK: "1" };
+const cacheEnv = { ...cliEnv, DOT_HOME: cacheHome };
 
 // The env-accounts fixture: a project directory holding an initialized workspace,
 // the .gitignore the docs recommend, and the secret the tape sources.
@@ -114,12 +128,25 @@ await $`node ${join(repoRoot, "dist/cli.mjs")} init`.cwd(ciProject).env(workspac
 const warmChains = [...new Set(tapes.flatMap((name) => tapeChains[name] ?? []))].sort();
 for (const chain of warmChains) {
   console.log(`  caching metadata for ${chain}`);
-  await $`node dist/cli.mjs chain update ${chain}`.cwd(repoRoot).env(cliEnv).quiet();
+  await $`node dist/cli.mjs chain update ${chain}`.cwd(repoRoot).env(cacheEnv).quiet();
 }
 
-if (hasSigner && tapes.some((name) => signingTapes.has(name))) {
-  console.log(`  adding signer account demo (secret read from ${signerEnv} at signing time)`);
-  await $`node dist/cli.mjs account add demo --env ${signerEnv}`.cwd(repoRoot).env(cliEnv).quiet();
+/** Rebuild demoHome from scratch for one tape: nothing but the metadata that
+ *  tape needs. Recording a subset then produces the same frames as recording
+ *  everything — without this, one tape's accounts and added chains show up in
+ *  the next tape's `account list` or `chain list`. */
+async function resetDemoHome(name: string) {
+  await rm(demoHome, { recursive: true, force: true });
+  await mkdir(join(demoHome, "chains"), { recursive: true });
+  for (const chain of tapeChains[name] ?? []) {
+    await cp(join(cacheHome, "chains", chain), join(demoHome, "chains", chain), {
+      recursive: true,
+    });
+  }
+  if (hasSigner && signingTapes.has(name)) {
+    console.log(`  adding signer account demo (secret read from ${signerEnv} at signing time)`);
+    await $`node dist/cli.mjs account add demo --env ${signerEnv}`.cwd(repoRoot).env(cliEnv).quiet();
+  }
 }
 
 const vhsEnv = {
@@ -130,6 +157,7 @@ const vhsEnv = {
 
 for (const name of tapes) {
   console.log(`Recording ${name} …`);
+  await resetDemoHome(name);
   await $`vhs ${join("tapes", `${name}.tape`)}`.cwd(repoRoot).env(vhsEnv);
 }
 
