@@ -244,7 +244,7 @@ dot polkadot.tx.System.remark 0xdead --from alice --tip 1000000 --dry-run
 
 For non-standard signed extensions, override with `--ext '{"<Identifier>":{"value":<v>}}'`. This also overrides builtin extensions polkadot-api fills in itself (e.g. `CheckMetadataHash`); unknown extension names are an error. List the chain's extensions with `dot <chain>.extensions`.
 
-On chains whose runtime carries the `VerifyMultiSignature` transaction extension (people chains on test networks), `--v5` signs as an Extrinsic V5 General transaction instead of v4. The CLI checks the capability up front and errors clearly on chains that can't authorize v5 (Polkadot, Kusama, and all asset hubs must sign v4). Requires `--from`; mutually exclusive with `--unsigned`.
+The CLI automatically signs with the highest extrinsic version the chain can authorize: Extrinsic V5 General on chains carrying the `VerifyMultiSignature` transaction extension (people chains on test networks), v4 everywhere else (Polkadot, Kusama, and all asset hubs). The output always shows which was used (`Type: signed (v4)` / `signed (v5 general)`; `extrinsicVersion` in `--json`). Force a version with `--v4` or `--v5` — a forced `--v5` errors clearly on chains that can't authorize it.
 
 ## Runtime APIs
 
@@ -708,7 +708,7 @@ dot verifiable verify --proof 0x<proof> --context dotns \
 | `--dry-run` / `--no-dry-run` | tx | Force / forbid dry-run (overrides `DOT_DRY_RUN`) |
 | `--dump` | query | Dump all entries of a storage map |
 | `--ext <json>` | tx | Custom signed extension values |
-| `--v5` | tx | Sign as Extrinsic V5 General (chain must carry `VerifyMultiSignature`) |
+| `--v4` / `--v5` | tx | Force the extrinsic version (default: v5 General when the chain carries `VerifyMultiSignature`, else v4) |
 | `--at <block>` | tx, query, apis | Block hash, `"best"`, or `"finalized"` to read/validate against. Defaults to finalized. Tx submission rejects `"best"`. |
 
 ## Common Errors
