@@ -35,8 +35,8 @@ describe("dot verifiable", { timeout: 15_000 }, () => {
     const { stdout, exitCode } = await runCli(["verifiable", "alice"]);
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Bandersnatch Member Key");
-    expect(stdout).toContain("Person:     full");
-    expect(stdout).toContain("Path:       //peopl.dot//0");
+    expect(stdout).toMatch(/Person:\s+full/);
+    expect(stdout).toMatch(/Path:\s+\/\/peopl\.dot\/\/0/);
     expect(stdout).toContain("Member Key:");
     // The ring context is not part of key derivation, so it must not appear here.
     expect(stdout).not.toMatch(/^\s+Context:/m);
@@ -45,8 +45,8 @@ describe("dot verifiable", { timeout: 15_000 }, () => {
   test("alice --person lite derives the lite member key", async () => {
     const { stdout, exitCode } = await runCli(["verifiable", "alice", "--person", "lite"]);
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("Person:     lite");
-    expect(stdout).toContain("Path:       //peopl.dot//1");
+    expect(stdout).toMatch(/Person:\s+lite/);
+    expect(stdout).toMatch(/Path:\s+\/\/peopl\.dot\/\/1/);
     expect(stdout).toContain("Member Key:");
   });
 
@@ -103,7 +103,7 @@ describe("dot verifiable", { timeout: 15_000 }, () => {
       accounts: [STORED_ACCOUNT],
     });
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("Person:     lite");
+    expect(stdout).toMatch(/Person:\s+lite/);
   });
 
   test("JSON output has correct structure", async () => {
@@ -171,6 +171,38 @@ describe("dot verifiable", { timeout: 15_000 }, () => {
     expect(result.memberKey).not.toBe(ALICE_FULL_MEMBER);
   });
 
+  test("--index selects an arbitrary RFC-0022 path", async () => {
+    const { stdout, exitCode } = await runCli([
+      "verifiable",
+      "alice",
+      "--product",
+      "dim2.dot",
+      "--index",
+      "1",
+      "--output",
+      "json",
+    ]);
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    expect(result.product).toBe("dim2.dot");
+    expect(result.path).toBe("//dim2.dot//1");
+    expect(result.scheme).toContain("RFC-0022");
+    // No --person was given, so none is reported.
+    expect(result.person).toBeUndefined();
+  });
+
+  test("--index 1 without --product equals --person lite", async () => {
+    const viaIndex = await runCli(["verifiable", "alice", "--index", "1", "--output", "json"]);
+    const viaPerson = await runCli(["verifiable", "alice", "--person", "lite", "--output", "json"]);
+    expect(JSON.parse(viaIndex.stdout).memberKey).toBe(JSON.parse(viaPerson.stdout).memberKey);
+  });
+
+  test("non-numeric --index is rejected", async () => {
+    const { stderr, exitCode } = await runCli(["verifiable", "alice", "--index", "abc"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("Invalid --index");
+  });
+
   test("all-digit --product is rejected", async () => {
     const { stderr, exitCode } = await runCli(["verifiable", "alice", "--product", "123"]);
     expect(exitCode).toBe(1);
@@ -221,18 +253,115 @@ describe("dot verifiable member (--person)", { timeout: 15_000 }, () => {
     expect(result.memberKey).toBe(ALICE_FULL_MEMBER);
     expect(result.person).toBe("full");
   });
+});
 
-  // The pre-RFC-0022 flag must fail loudly: silently deriving a different key
-  // would produce proofs no ring accepts, which is far worse than an error.
-  test("--entropy-key is rejected with a pointer to --person", async () => {
-    const { stderr, exitCode } = await runCli([
+// Tier 3 (legacy) and tier 4 (raw). These pin the values the CLI produced before
+// RFC-0022, which are still what pre-cutover identities hold on-chain.
+const ALICE_LEGACY_KEYED = "0x5f915576987547d3e55bb4129ac8cae1d338f8933073dc74272b4c825f738592";
+const ALICE_LEGACY_UNKEYED = "0xbb6ee099b568f1844d62fc00e6305c2e83aa8da30ce59e664ef39e089204d43c";
+const ALICE_FULL_ENTROPY = "0xd84a29dce4179ef9eda1a9c189a9a2fd1bb4d2a3eb048b37d48264180af3b38b";
+
+// @ts-expect-error Bun supports describe(label, options, fn) at runtime
+describe("dot verifiable member (legacy and raw tiers)", { timeout: 20_000 }, () => {
+  test("--entropy-key candidate reproduces the pre-RFC-0022 full key", async () => {
+    const { stdout, exitCode } = await runCli([
       "verifiable",
       "alice",
       "--entropy-key",
       "candidate",
+      "--output",
+      "json",
     ]);
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    expect(result.memberKey).toBe(ALICE_LEGACY_KEYED);
+    expect(result.scheme).toContain("legacy");
+    expect(result.entropyKey).toBe("candidate");
+  });
+
+  test("--entropy-key '' reproduces the pre-RFC-0022 lite key and reads as unkeyed", async () => {
+    const { stdout } = await runCli([
+      "verifiable",
+      "alice",
+      "--entropy-key",
+      "",
+      "--output",
+      "json",
+    ]);
+    const result = JSON.parse(stdout);
+    expect(result.memberKey).toBe(ALICE_LEGACY_UNKEYED);
+    expect(result.entropyKey).toBe("(unkeyed)");
+  });
+
+  test("legacy keys differ from the RFC-0022 ones", async () => {
+    expect(ALICE_LEGACY_KEYED).not.toBe(ALICE_FULL_MEMBER);
+  });
+
+  test("--entropy uses the bytes verbatim, with no account", async () => {
+    const { stdout, exitCode } = await runCli([
+      "verifiable",
+      "--entropy",
+      ALICE_FULL_ENTROPY,
+      "--output",
+      "json",
+    ]);
+    expect(exitCode).toBe(0);
+    const result = JSON.parse(stdout);
+    // Feeding alice's own tier-1 entropy must reproduce her tier-1 member key.
+    expect(result.memberKey).toBe(ALICE_FULL_MEMBER);
+    expect(result.scheme).toContain("raw");
+    expect(result.account).toBeUndefined();
+  });
+
+  test("--entropy signs without an account and the signature verifies", async () => {
+    const signed = JSON.parse(
+      (
+        await runCli([
+          "verifiable",
+          "sign",
+          "--entropy",
+          ALICE_FULL_ENTROPY,
+          "--message",
+          "hello",
+          "--output",
+          "json",
+        ])
+      ).stdout,
+    );
+    expect(signed.member).toBe(ALICE_FULL_MEMBER);
+    const ok = await runCli([
+      "verifiable",
+      "verify-sig",
+      "--signature",
+      signed.signature,
+      "--member",
+      signed.member,
+      "--message",
+      "hello",
+    ]);
+    expect(ok.exitCode).toBe(0);
+  });
+
+  test("--entropy must be exactly 32 bytes", async () => {
+    const { stderr, exitCode } = await runCli(["verifiable", "--entropy", "0xdead"]);
     expect(exitCode).toBe(1);
-    expect(stderr).toContain("--person full");
+    expect(stderr).toContain("exactly 32 bytes");
+  });
+
+  // Tiers must never be combined: the result would be a valid-looking key from a
+  // scheme the caller did not ask for, which only fails at ring-validation time.
+  test.each([
+    [["--entropy", ALICE_FULL_ENTROPY, "--person", "lite"], "cannot be combined with --person"],
+    [
+      ["--entropy", ALICE_FULL_ENTROPY, "--entropy-key", "x"],
+      "cannot be combined with --entropy-key",
+    ],
+    [["--entropy-key", "candidate", "--product", "dim2.dot"], "cannot be combined with --product"],
+    [["--person", "full", "--index", "3"], "--person already fixes the index"],
+  ])("rejects conflicting selectors %j", async (args, message) => {
+    const { stderr, exitCode } = await runCli(["verifiable", "alice", ...(args as string[])]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(message as string);
   });
 });
 

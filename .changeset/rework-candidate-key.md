@@ -2,14 +2,25 @@
 "polkadot-cli": minor
 ---
 
-Derive Bandersnatch member keys per RFC-0022, replacing the `candidate` entropy key.
+Derive Bandersnatch member keys per RFC-0022, and make every derivation scheme reachable.
 
-Member keys now come from the ring-VRF keyed-hash tree the reference apps use: the BIP39 entropy is hashed with key `"ring-vrf"` to get a tree root, then folded through the hard junctions `//peopl.dot` and `//index_bytes(n)`. Index 0 is the **full** person (ring `pop:polkadot.network/people`), index 1 the **lite** person (`…/people-lite`) — two keys held at once, not a rotation. `dot verifiable` takes `--person full|lite` in place of `--entropy-key`, `dot account create` stores both under `full` / `lite`, and the derived entropy is what `alias`, `sign`, and `prove` use.
+Member keys now default to the ring-VRF keyed-hash tree the reference apps use: the BIP39 entropy is hashed with key `"ring-vrf"` to get a tree root, then folded through the hard junctions `//peopl.dot` and `//index_bytes(n)`. Index 0 is the **full** person (ring `pop:polkadot.network/people`), index 1 the **lite** person (`…/people-lite`) — two keys held at once, not a rotation. `dot account create` derives and stores both as `full` / `lite`.
 
-The previous scheme was a single keyed blake2b over the BIP39 entropy — `--entropy-key candidate` for a full person, unkeyed for lite — which is not a junction path at all. `--entropy-key` is now rejected with a pointer to `--person` rather than ignored: silently deriving a different key would produce proofs no ring accepts. The default changed too, from lite to full, matching the apps' own fallback and pallet-people's "no collection junction → PoP ring" rule.
+`dot verifiable` now exposes four tiers for the member secret, and rejects any combination of them:
 
-The product id stays `peopl.dot` on **every** network. It is a governance-reserved dotNS constant that iOS and Android both pin regardless of chain (Android's `ProductId` regex cannot express a non-`.dot` TLD), and the network axis for personhood lives in the ring — `chainId` plus collection id — not in the key. `--product <id>` overrides it for clients that deliberately diverge; a different id derives a key no ring holds, so it is an escape hatch rather than a per-network switch. All-digit ids are rejected, since Substrate SCALE-encodes numeric junctions as `u64` and would silently derive a different key.
+| Tier | Flags | Derivation |
+|---|---|---|
+| Well-known (default) | `--person full\|lite` | `//peopl.dot//index_bytes(0\|1)` |
+| Any RFC-0022 path | `--product <id> --index <n>` | `//<id>//index_bytes(n)` |
+| Legacy (pre-RFC-0022) | `--entropy-key <text\|0xhex>` | `blake2b(bip39Entropy, key)` — one level |
+| Raw | `--entropy 0x<64hex>` | none — the 32 bytes *are* the secret |
 
-This is breaking for anyone holding a key from the old scheme. The reference apps cut over the same way without migrating existing installs, so an identity registered before the switch keeps its old on-chain key until the runtime's `migrate_included_key` moves it — and that key is no longer derivable here.
+The legacy tier is kept deliberately. The reference apps cut over without migrating existing installs, so an identity registered before the switch still holds its old key on-chain until `migrate_included_key` moves it — reproducing that key is exactly what a debugging CLI is for. The raw tier needs no account at all, so `sign`, `alias`, and `prove` work with a secret produced by any other implementation.
 
-Tests pin the published cross-platform vectors (root entropy `0x01..0x20`) against iOS `KeyedHashChainDeriverTests` and the Android equivalent, so a divergence from the phone apps fails loudly. This also replaces two "snapshot" tests that asserted `expect(x).toBe(x)` and pinned nothing.
+Because a key from the wrong tier is indistinguishable until it fails ring validation, every command now prints the `Scheme:` it used, and mixing selector flags is an error rather than a precedence rule.
+
+The product id stays `peopl.dot` on **every** network. It is a governance-reserved dotNS constant that iOS and Android both pin regardless of chain (Android's `ProductId` regex cannot even express a non-`.dot` TLD), and the network axis for personhood lives in the ring — `chainId` plus collection id — not in the key. `--product` overrides it for clients that deliberately diverge. All-digit ids are rejected, since Substrate SCALE-encodes numeric junctions as `u64` and would otherwise silently derive a different key.
+
+Breaking: the default changed from lite to full, so a bare `dot verifiable alice` returns a different key than in the previous release. `--entropy-key candidate` still works but now selects the labelled legacy tier rather than being the normal path.
+
+Tests pin the published cross-platform vectors (root entropy `0x01..0x20`) against iOS `KeyedHashChainDeriverTests` and the Android equivalent, so a divergence from the phone apps fails loudly, plus the pre-RFC-0022 values for the legacy tier. This also replaces two "snapshot" tests that asserted `expect(x).toBe(x)` and pinned nothing.

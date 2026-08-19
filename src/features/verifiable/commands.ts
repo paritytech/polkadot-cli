@@ -25,8 +25,9 @@ import {
   bandersnatchSign,
   DEFAULT_RING_EXPONENT,
   deriveAlias,
+  deriveLegacyMemberEntropy,
   deriveMemberKey,
-  derivePersonEntropy,
+  deriveRingVrfEntropy,
   encodeContext,
   encodeMembers,
   isPersonKind,
@@ -34,6 +35,8 @@ import {
   PERSON_INDEX,
   PERSONHOOD_PRODUCT_ID,
   type PersonKind,
+  parseRawEntropy,
+  resolveEntropyKey,
   ringProve,
   verifyBandersnatchSig,
   verifyRingProof,
@@ -109,29 +112,136 @@ async function resolveMnemonic(account: string): Promise<string> {
 }
 
 /**
- * Resolve `--person` / `--product`. `--entropy-key` was the pre-RFC-0022 flag and
- * is rejected with a pointer rather than ignored: silently deriving a different
- * key than the caller asked for would produce proofs no ring accepts.
+ * How the member secret is obtained. Four tiers, from most opinionated to least:
+ * the RFC-0022 well-known personhood paths, an arbitrary RFC-0022 tree path, the
+ * pre-RFC-0022 single keyed hash, and raw caller-supplied bytes.
  */
-function resolvePersonSelector(opts: VerifiableOpts): { person: PersonKind; productId: string } {
-  if (opts.entropyKey !== undefined) {
-    throw new CliError(
-      `"--entropy-key" was removed: member keys now follow RFC-0022 ` +
-        `(//${PERSONHOOD_PRODUCT_ID}//index). Use "--person full" (was ` +
-        `"--entropy-key candidate") or "--person lite" (was unkeyed).`,
-    );
+type KeySource =
+  | { kind: "tree"; productId: string; index: number; person?: PersonKind }
+  | { kind: "legacy"; entropyKey?: string }
+  | { kind: "raw"; entropy: Uint8Array };
+
+function parseIndex(value: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0 || n > 0xffffffff) {
+    throw new CliError(`Invalid --index "${value}". Expected a u32 (0 … 4294967295).`);
   }
-  const value = opts.person ?? "full";
-  if (!isPersonKind(value)) {
-    throw new CliError(`Invalid --person "${value}". Supported: full, lite.`);
-  }
-  return { person: value, productId: opts.product ?? PERSONHOOD_PRODUCT_ID };
+  return n;
 }
 
-async function resolveEntropy(account: string, opts: VerifiableOpts): Promise<Uint8Array> {
-  const { person, productId } = resolvePersonSelector(opts);
-  const mnemonic = await resolveMnemonic(account);
-  return derivePersonEntropy(mnemonic, person, productId);
+/**
+ * Resolve the selector flags to a {@link KeySource}, rejecting combinations that
+ * would silently pick one scheme while the caller meant another. Getting this
+ * wrong yields a valid-looking key that no ring holds, so every conflict is an
+ * error rather than a precedence rule.
+ */
+function resolveKeySource(opts: VerifiableOpts): KeySource {
+  const treeFlags = [
+    opts.person !== undefined && "--person",
+    opts.product !== undefined && "--product",
+    opts.index !== undefined && "--index",
+  ].filter(Boolean) as string[];
+
+  if (opts.entropy !== undefined) {
+    const conflicts = [...treeFlags, opts.entropyKey !== undefined && "--entropy-key"].filter(
+      Boolean,
+    );
+    if (conflicts.length > 0) {
+      throw new CliError(
+        `--entropy is the member secret itself, so it cannot be combined with ${conflicts.join(", ")}.`,
+      );
+    }
+    return { kind: "raw", entropy: parseRawEntropy(opts.entropy) };
+  }
+
+  if (opts.entropyKey !== undefined) {
+    if (treeFlags.length > 0) {
+      throw new CliError(
+        `--entropy-key selects the legacy pre-RFC-0022 scheme, so it cannot be ` +
+          `combined with ${treeFlags.join(", ")}.`,
+      );
+    }
+    return { kind: "legacy", entropyKey: opts.entropyKey };
+  }
+
+  if (opts.person !== undefined && opts.index !== undefined) {
+    throw new CliError(
+      `--person already fixes the index (full=0, lite=1). Use --index on its own, ` +
+        `or with --product, to pick an arbitrary one.`,
+    );
+  }
+
+  const productId = opts.product ?? PERSONHOOD_PRODUCT_ID;
+
+  if (opts.index !== undefined) {
+    return { kind: "tree", productId, index: parseIndex(opts.index) };
+  }
+
+  const person = opts.person ?? "full";
+  if (!isPersonKind(person)) {
+    throw new CliError(`Invalid --person "${person}". Supported: full, lite.`);
+  }
+  return { kind: "tree", productId, index: PERSON_INDEX[person], person };
+}
+
+/** Whether this source needs an account at all — raw entropy stands alone. */
+function sourceNeedsAccount(source: KeySource): boolean {
+  return source.kind !== "raw";
+}
+
+async function entropyForSource(
+  source: KeySource,
+  account: string | undefined,
+): Promise<Uint8Array> {
+  if (source.kind === "raw") return source.entropy;
+  const mnemonic = await resolveMnemonic(account!);
+  if (source.kind === "legacy") {
+    return deriveLegacyMemberEntropy(mnemonic, resolveEntropyKey(source.entropyKey));
+  }
+  return deriveRingVrfEntropy(mnemonic, source.productId, source.index);
+}
+
+/** Human-readable description of what produced the key, for output and JSON. */
+interface SourceDescription {
+  scheme: string;
+  product?: string;
+  path?: string;
+  person?: string;
+  entropyKey?: string;
+}
+
+function describeSource(source: KeySource): SourceDescription {
+  switch (source.kind) {
+    case "raw":
+      return { scheme: "raw (caller-supplied entropy)" };
+    case "legacy":
+      return {
+        scheme: "legacy keyed-hash (pre-RFC-0022)",
+        // An empty --entropy-key is the unkeyed (lite) variant, not a key of "".
+        entropyKey: source.entropyKey ? source.entropyKey : "(unkeyed)",
+      };
+    default:
+      return {
+        scheme: "RFC-0022 ring-VRF",
+        product: source.productId,
+        path: `//${source.productId}//${source.index}`,
+        ...(source.person ? { person: source.person } : {}),
+      };
+  }
+}
+
+/**
+ * Resolve an account + selector flags to the member secret. Raw entropy needs no
+ * account; every other tier does.
+ */
+async function resolveEntropy(
+  account: string | undefined,
+  opts: VerifiableOpts,
+  action: string,
+): Promise<Uint8Array> {
+  const source = resolveKeySource(opts);
+  if (sourceNeedsAccount(source)) requireAccount(account, action);
+  return entropyForSource(source, account);
 }
 
 function requireAccount(account: string | undefined, action: string): string {
@@ -185,36 +295,54 @@ function requireOption(value: string | undefined, flag: string, action: string):
 
 /**
  * Accounts-file key for a derived member key. The two reserved personhood keys
- * store as `full` / `lite`; a `--product` override stores under its full path so
- * it can never be mistaken for one of them.
+ * store as `full` / `lite`; anything else stores under a namespaced key so it can
+ * never be mistaken for one of them (and so `--entropy-key full` cannot collide).
+ * Raw entropy is never persisted — it belongs to no account.
  */
-export function bandersnatchEntryKey(person: PersonKind, productId: string): string {
-  return productId === PERSONHOOD_PRODUCT_ID ? person : `${productId}/${PERSON_INDEX[person]}`;
+function bandersnatchEntryKey(source: KeySource): string | undefined {
+  switch (source.kind) {
+    case "raw":
+      return undefined;
+    case "legacy":
+      return `legacy:${source.entropyKey ?? ""}`;
+    default:
+      return source.productId === PERSONHOOD_PRODUCT_ID && source.person
+        ? source.person
+        : `${source.productId}/${source.index}`;
+  }
 }
 
 async function deriveMember(accountArg: string | undefined, opts: VerifiableOpts) {
-  const account = requireAccount(accountArg, "member");
-  const { person, productId } = resolvePersonSelector(opts);
+  const source = resolveKeySource(opts);
+  const needsAccount = sourceNeedsAccount(source);
+  const account = needsAccount ? requireAccount(accountArg, "member") : accountArg;
 
-  let mnemonic: string;
+  let entropy: Uint8Array;
   let accountsFile: AccountsFile | undefined;
   let stored: StoredAccount | undefined;
-  if (isDevAccount(account)) {
-    mnemonic = DEV_PHRASE;
+
+  if (source.kind === "raw") {
+    entropy = source.entropy;
+  } else if (isDevAccount(account!)) {
+    entropy = await entropyForSource(source, account);
   } else {
+    // Load through the accounts file rather than resolveMnemonic, so the derived
+    // key can be written back to the stored account below.
     accountsFile = await loadAccounts();
-    stored = findAccount(accountsFile, account);
-    mnemonic = mnemonicFromStored(stored, account, accountsFile);
+    stored = findAccount(accountsFile, account!);
+    const mnemonic = mnemonicFromStored(stored, account!, accountsFile);
+    entropy =
+      source.kind === "legacy"
+        ? deriveLegacyMemberEntropy(mnemonic, resolveEntropyKey(source.entropyKey))
+        : deriveRingVrfEntropy(mnemonic, source.productId, source.index);
   }
 
-  const memberKeyHex = publicKeyToHex(
-    deriveMemberKey(derivePersonEntropy(mnemonic, person, productId)),
-  );
-  const path = `//${productId}//${PERSON_INDEX[person]}`;
+  const memberKeyHex = publicKeyToHex(deriveMemberKey(entropy));
+  const described = describeSource(source);
 
-  if (stored && accountsFile) {
+  const entryKey = bandersnatchEntryKey(source);
+  if (stored && accountsFile && entryKey !== undefined) {
     if (!stored.bandersnatch) stored.bandersnatch = {};
-    const entryKey = bandersnatchEntryKey(person, productId);
     if (stored.bandersnatch[entryKey] !== memberKeyHex) {
       stored.bandersnatch[entryKey] = memberKeyHex;
       await saveAccounts(accountsFile);
@@ -222,21 +350,32 @@ async function deriveMember(accountArg: string | undefined, opts: VerifiableOpts
   }
 
   if (isJsonOutput(opts)) {
-    console.log(formatJson({ account, person, product: productId, path, memberKey: memberKeyHex }));
+    console.log(
+      formatJson({ ...(account ? { account } : {}), ...described, memberKey: memberKeyHex }),
+    );
   } else {
+    // Pad past the longest label ("Entropy Key:", 12) so every value lines up
+    // with at least one separating space.
+    const row = (label: string, value: string) =>
+      console.log(`  ${BOLD}${`${label}:`.padEnd(13)}${RESET}${value}`);
+
     printHeading("Bandersnatch Member Key");
-    console.log(`  ${BOLD}Account:${RESET}    ${account}`);
-    console.log(`  ${BOLD}Person:${RESET}     ${person}`);
-    console.log(`  ${BOLD}Path:${RESET}       ${path}`);
-    console.log(`  ${BOLD}Member Key:${RESET} ${memberKeyHex}`);
+    if (account) row("Account", account);
+    // Always state the scheme: a key from the wrong tier looks identical, and the
+    // only signal that it will not validate against a ring is this line.
+    row("Scheme", described.scheme);
+    if (described.person) row("Person", described.person);
+    if (described.path) row("Path", described.path);
+    if (described.entropyKey) row("Entropy Key", described.entropyKey);
+    row("Member Key", memberKeyHex);
     console.log();
   }
 }
 
 async function deriveAliasCmd(accountArg: string | undefined, opts: VerifiableOpts) {
-  const account = requireAccount(accountArg, "alias");
   const contextStr = requireOption(opts.context, "--context", "alias");
-  const entropy = await resolveEntropy(account, opts);
+  const entropy = await resolveEntropy(accountArg, opts, "alias");
+  const account = accountArg;
   const context = encodeContext(contextStr);
   const aliasHex = toHex(deriveAlias(entropy, context));
 
@@ -252,9 +391,9 @@ async function deriveAliasCmd(accountArg: string | undefined, opts: VerifiableOp
 }
 
 async function signCmd(accountArg: string | undefined, opts: VerifiableOpts) {
-  const account = requireAccount(accountArg, "sign");
   const message = await resolveMessage(opts);
-  const entropy = await resolveEntropy(account, opts);
+  const entropy = await resolveEntropy(accountArg, opts, "sign");
+  const account = accountArg;
   const signature = bandersnatchSign(entropy, message);
   const member = deriveMemberKey(entropy);
   const sigHex = toHex(signature);
@@ -279,12 +418,12 @@ async function signCmd(accountArg: string | undefined, opts: VerifiableOpts) {
 }
 
 async function proveCmd(accountArg: string | undefined, opts: VerifiableOpts) {
-  const account = requireAccount(accountArg, "prove");
   const contextStr = requireOption(opts.context, "--context", "prove");
   const membersArg = requireOption(opts.members, "--members", "prove");
   const message = await resolveMessage(opts);
   const ringExponent = resolveRingExponent(opts);
-  const entropy = await resolveEntropy(account, opts);
+  const entropy = await resolveEntropy(accountArg, opts, "prove");
+  const account = accountArg;
   const context = encodeContext(contextStr);
   const members = await resolveBytesArg(membersArg, "--members", true);
 

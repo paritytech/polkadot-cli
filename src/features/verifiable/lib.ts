@@ -42,11 +42,12 @@ import {
  *   app/namespace identifier the alias is bound to. It is NOT part of the key
  *   derivation. Do not conflate the two.
  *
- * This replaces the pre-RFC-0022 scheme, which was a single keyed blake2b over the
- * BIP39 entropy — `key = "candidate"` for a full person, unkeyed for lite. Keys
- * derived that way are not reproducible here any more; the reference apps cut over
- * without migrating, so identities registered under the old scheme stay on their
- * old key until the runtime's `migrate_included_key` moves them.
+ * This is the default scheme, but not the only one the CLI can produce. See
+ * {@link deriveLegacyMemberEntropy} for the pre-RFC-0022 single keyed hash, which
+ * identities registered before the cutover still hold on-chain, and
+ * {@link parseRawEntropy} for using a secret from any other implementation
+ * verbatim. Every command names the scheme it used in its output, because a key
+ * from the wrong tier is indistinguishable until it fails to validate.
  */
 
 /** On-chain `RingExponent` discriminants (verifiablejs `RingExponent`). Capacity = 2^x − 257. */
@@ -182,6 +183,55 @@ export function deriveRingVrfEntropy(
 /** 32-byte Bandersnatch member public key from member entropy. */
 export function deriveMemberKey(entropy: Uint8Array): Uint8Array {
   return member_from_entropy(entropy);
+}
+
+/**
+ * Resolve a legacy `--entropy-key` flag value to the raw keyed-blake2b key bytes.
+ * `0x`-prefixed input is hex; anything else is UTF-8 (matching iOS's old
+ * `Data("candidate".utf8)`). Empty / undefined → unkeyed.
+ */
+export function resolveEntropyKey(value: string | undefined): Uint8Array | undefined {
+  if (value === undefined || value === "") return undefined;
+  return textOrHexBytes(value, "entropy-key");
+}
+
+/**
+ * Pre-RFC-0022 member entropy: a **single** keyed blake2b over the BIP39 entropy,
+ * with no junctions and no tree — `blake2b256(bip39Entropy, key = entropyKey?)`.
+ * Keyed with `"candidate"` it was a full person, unkeyed a lite person.
+ *
+ * Retained because the reference apps cut over to {@link deriveRingVrfEntropy}
+ * without migrating existing installs: identities registered before the switch
+ * still hold these keys on-chain until `migrate_included_key` moves them, and
+ * reproducing one is exactly what this CLI is for. It is not how new keys should
+ * be derived.
+ *
+ * Note this can reproduce only the *first* level of the RFC-0022 tree — passing
+ * `"ring-vrf"` yields the tree root — and can never reach a member entropy,
+ * because the tree hashes each level's output as the next level's data while
+ * this always hashes the BIP39 entropy.
+ */
+export function deriveLegacyMemberEntropy(mnemonic: string, entropyKey?: Uint8Array): Uint8Array {
+  const entropy = mnemonicToEntropy(mnemonic);
+  const opts: { dkLen: number; key?: Uint8Array } = { dkLen: 32 };
+  if (entropyKey !== undefined && entropyKey.length > 0) {
+    opts.key = entropyKey;
+  }
+  return blake2b(entropy, opts);
+}
+
+/**
+ * Validate a raw 32-byte member entropy supplied directly by the caller
+ * (`--entropy`), bypassing derivation entirely. Lets the tool sign, alias, and
+ * prove for a secret produced by any other implementation — including the
+ * unhashed `member_from_entropy(bip39Entropy)` form — without an account.
+ */
+export function parseRawEntropy(value: string): Uint8Array {
+  const bytes = textOrHexBytes(value, "entropy");
+  if (bytes.length !== 32) {
+    throw new Error(`--entropy must be exactly 32 bytes (got ${bytes.length})`);
+  }
+  return bytes;
 }
 
 /**

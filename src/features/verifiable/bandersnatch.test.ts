@@ -1,18 +1,23 @@
 import { describe, expect, test } from "bun:test";
-import { DEV_PHRASE } from "@polkadot-labs/hdkd-helpers";
+import { DEV_PHRASE, mnemonicToEntropy } from "@polkadot-labs/hdkd-helpers";
 import {
   derivationIndex32,
   deriveBandersnatchMember,
+  deriveLegacyMemberEntropy,
+  deriveMemberKey,
   derivePersonEntropy,
   deriveRingVrfEntropyFromRoot,
   hardChainCode,
   PERSON_INDEX,
   PERSONHOOD_PRODUCT_ID,
+  parseRawEntropy,
 } from "./lib.ts";
 
 // 24-word mnemonic, to prove the tree is rooted at BIP39 entropy of any length.
 const MNEMONIC_24 =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art";
+
+const utf8 = (s: string) => new TextEncoder().encode(s);
 
 function toHex(bytes: Uint8Array): string {
   return `0x${Array.from(bytes)
@@ -119,6 +124,35 @@ describe("deriveBandersnatchMember", () => {
     const key = deriveBandersnatchMember(MNEMONIC_24, "full");
     expect(key).toBeInstanceOf(Uint8Array);
     expect(key.length).toBe(32);
+  });
+
+  test("legacy keyed-hash reproduces the pre-RFC-0022 keys", () => {
+    // One hash, no junctions. These are what pre-cutover identities hold on-chain.
+    expect(toHex(deriveMemberKey(deriveLegacyMemberEntropy(DEV_PHRASE, utf8("candidate"))))).toBe(
+      "0x5f915576987547d3e55bb4129ac8cae1d338f8933073dc74272b4c825f738592",
+    );
+    expect(toHex(deriveMemberKey(deriveLegacyMemberEntropy(DEV_PHRASE)))).toBe(
+      "0xbb6ee099b568f1844d62fc00e6305c2e83aa8da30ce59e664ef39e089204d43c",
+    );
+  });
+
+  test("legacy with key 'ring-vrf' reaches the tree root but never a member entropy", () => {
+    // The legacy scheme can reproduce level 1 of the RFC-0022 tree, because both
+    // hash the BIP39 entropy. It cannot reach level 3: the tree feeds each level's
+    // output in as the next level's data, and the legacy key only ever varies the key.
+    const treeRoot = deriveLegacyMemberEntropy(DEV_PHRASE, utf8("ring-vrf"));
+    const full = derivePersonEntropy(DEV_PHRASE, "full");
+    expect(toHex(treeRoot)).not.toBe(toHex(full));
+    // Proof it really is level 1: rebuilding levels 2 and 3 on top of it lands on `full`.
+    expect(toHex(deriveRingVrfEntropyFromRoot(mnemonicToEntropy(DEV_PHRASE), "peopl.dot", 0))).toBe(
+      toHex(full),
+    );
+  });
+
+  test("parseRawEntropy accepts exactly 32 bytes", () => {
+    expect(parseRawEntropy(`0x${"11".repeat(32)}`).length).toBe(32);
+    expect(() => parseRawEntropy("0xdead")).toThrow(/exactly 32 bytes/);
+    expect(() => parseRawEntropy(`0x${"11".repeat(33)}`)).toThrow(/exactly 32 bytes/);
   });
 
   test("a --product override derives a different key than the reserved id", () => {
