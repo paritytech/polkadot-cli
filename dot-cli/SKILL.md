@@ -702,13 +702,13 @@ dot polkadot.tx.System.remark 0xdeadbeef --to-yaml
 
 Two distinct inputs — do not conflate:
 - `--person full|lite`: which RFC-0022 personhood key to derive. `full` (default) = `//peopl.dot//0`, ring `pop:polkadot.network/people`; `lite` = `//peopl.dot//1`, ring `pop:polkadot.network/people-lite`. Two keys held at once, not a rotation. `--product <id>` overrides the reserved `peopl.dot` product id — escape hatch only, since the reference apps pin it on every network.
-- `--context <text|0xhex>`: the 32-byte ring/proof namespace (zero-padded right, like `bytes32()`). Determines the alias. Used by `alias`/`prove`/`verify`. NOT part of key derivation.
+- `--context <text|0xhex>`: the 32-byte ring/proof namespace (zero-padded right, like `bytes32()`). Determines the alias. Used by `alias`/`prove`/`verify`. NOT part of key derivation — `member` rejects it (it once selected the legacy entropy key there; that is `--entropy-key` now).
 
-Two more tiers exist for the secret: `--entropy-key <k>` selects the **legacy** pre-RFC-0022 scheme (one keyed blake2b over the BIP39 entropy; `candidate` = full, omitted = lite) for identities registered before the cutover, and `--entropy 0x<64hex>` uses 32 bytes **verbatim** with no derivation and no account. Combining tiers is an error; the output always names the scheme used.
+Two more tiers exist for the secret: `--entropy-key <k>` selects the **legacy** pre-RFC-0022 scheme (one keyed blake2b over the BIP39 entropy; `candidate` = full, omitted = lite) for identities registered before the cutover, and `--entropy 0x<64hex>` uses 32 bytes **verbatim** (0x-hex only) with no derivation and no account. Combining tiers — including `--person` with `--product` — is an error; every command reports the scheme used (JSON `scheme`: `rfc-0022` | `legacy` | `raw`).
 
 ```bash
 # Member key (who you are in a ring). Defaults to the full person.
-dot verifiable alice --json                # { account, person, product, path, memberKey }
+dot verifiable alice --json                # { account, scheme, person, product, path, memberKey }
 dot verifiable alice --person lite --json
 dot verifiable alice --product dim2.dot --index 1 --json   # any RFC-0022 path
 dot verifiable alice --entropy-key candidate --json        # legacy pre-RFC-0022 key

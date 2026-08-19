@@ -27,6 +27,8 @@ export interface RunCliOptions {
    * and refetch metadata from the live chain.
    */
   noMetadataFingerprint?: boolean;
+  /** Read accounts.json back after the run (the temp HOME is deleted otherwise). */
+  readAccounts?: boolean;
 }
 
 function deepMergeConfig(base: Config, override: Partial<Config>): Config {
@@ -49,7 +51,13 @@ function deepMergeConfig(base: Config, override: Partial<Config>): Config {
 export async function runCli(
   args: string[],
   options?: RunCliOptions,
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+): Promise<{
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  /** Post-run accounts.json contents; only present with `readAccounts: true`. */
+  accountsAfter?: { accounts: StoredAccount[] };
+}> {
   const tmpHome = mkdtempSync(join(tmpdir(), "dot-test-"));
   const dotDir = join(tmpHome, ".polkadot");
 
@@ -152,7 +160,15 @@ export async function runCli(
       new Response(proc.stderr as ReadableStream).text(),
     ]);
     const exitCode = await proc.exited;
-    return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode };
+    let accountsAfter: { accounts: StoredAccount[] } | undefined;
+    if (options?.readAccounts) {
+      try {
+        accountsAfter = JSON.parse(readFileSync(join(dotDir, "accounts.json"), "utf8"));
+      } catch {
+        // No accounts file written — leave undefined.
+      }
+    }
+    return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode, accountsAfter };
   } finally {
     rmSync(tmpHome, { recursive: true, force: true });
   }

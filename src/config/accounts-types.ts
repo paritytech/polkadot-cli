@@ -20,7 +20,8 @@ export interface StoredAccount {
   derivationPath: string; // "" for root
   source?: AccountSource;
   // RFC-0022 ring-VRF member keys: "full" = //peopl.dot//0, "lite" = //peopl.dot//1.
-  // A --product override stores under "<productId>/<index>".
+  // A --product/--index override stores under "<productId>/<index>", and legacy
+  // pre-RFC-0022 keyed-hash keys under "legacy:<entropyKey>" ("legacy:" = unkeyed).
   bandersnatch?: Record<string, string>;
 }
 

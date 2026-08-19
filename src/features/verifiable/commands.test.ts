@@ -149,10 +149,14 @@ describe("dot verifiable", { timeout: 15_000 }, () => {
     expect(stderr).toContain("BIP39 mnemonic");
   });
 
-  test("--context does not affect member-key derivation", async () => {
-    const bare = await runCli(["verifiable", "alice", "--output", "json"]);
-    const withCtx = await runCli(["verifiable", "alice", "--context", "dotns", "--output", "json"]);
-    expect(JSON.parse(bare.stdout).memberKey).toBe(JSON.parse(withCtx.stdout).memberKey);
+  test("member rejects --context, pointing at --entropy-key", async () => {
+    // `--context` once selected the legacy entropy key on this command. Silently
+    // ignoring it would return the RFC-0022 key to a caller who meant the legacy
+    // one, so it must error.
+    const { stderr, exitCode } = await runCli(["verifiable", "alice", "--context", "candidate"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("no part in member-key derivation");
+    expect(stderr).toContain("--entropy-key candidate");
   });
 
   test("--product override derives a different key and reports the path", async () => {
@@ -186,7 +190,7 @@ describe("dot verifiable", { timeout: 15_000 }, () => {
     const result = JSON.parse(stdout);
     expect(result.product).toBe("dim2.dot");
     expect(result.path).toBe("//dim2.dot//1");
-    expect(result.scheme).toContain("RFC-0022");
+    expect(result.scheme).toBe("rfc-0022");
     // No --person was given, so none is reported.
     expect(result.person).toBeUndefined();
   });
@@ -232,6 +236,26 @@ describe("dot verifiable", { timeout: 15_000 }, () => {
     // The key should be visible in the output
     expect(derive.stdout).toContain("Member Key:");
   });
+
+  test("derive renames pre-RFC-0022 store entries to their legacy: names", async () => {
+    // Accounts created before RFC-0022 hold entries under "" and "candidate";
+    // left as-is they read as current keys in `account inspect`.
+    const acct: StoredAccount = {
+      ...STORED_ACCOUNT,
+      bandersnatch: { "": "0xaa", candidate: "0xbb" },
+    };
+    const { exitCode, accountsAfter } = await runCli(
+      ["verifiable", "my-account", "--person", "lite"],
+      { accounts: [acct], readAccounts: true },
+    );
+    expect(exitCode).toBe(0);
+    const stored = accountsAfter?.accounts.find((a) => a.name === "my-account");
+    expect(stored?.bandersnatch?.[""]).toBeUndefined();
+    expect(stored?.bandersnatch?.candidate).toBeUndefined();
+    expect(stored?.bandersnatch?.["legacy:"]).toBe("0xaa");
+    expect(stored?.bandersnatch?.["legacy:candidate"]).toBe("0xbb");
+    expect(stored?.bandersnatch?.lite).toMatch(/^0x[0-9a-f]{64}$/);
+  });
 });
 
 const ALICE_FULL_MEMBER = "0x69ef2ed666eb7bfabcf93b4360c59439a03d6de3cccf77a411fcaa7017caf4a3";
@@ -275,7 +299,7 @@ describe("dot verifiable member (legacy and raw tiers)", { timeout: 20_000 }, ()
     expect(exitCode).toBe(0);
     const result = JSON.parse(stdout);
     expect(result.memberKey).toBe(ALICE_LEGACY_KEYED);
-    expect(result.scheme).toContain("legacy");
+    expect(result.scheme).toBe("legacy");
     expect(result.entropyKey).toBe("candidate");
   });
 
@@ -309,7 +333,7 @@ describe("dot verifiable member (legacy and raw tiers)", { timeout: 20_000 }, ()
     const result = JSON.parse(stdout);
     // Feeding alice's own tier-1 entropy must reproduce her tier-1 member key.
     expect(result.memberKey).toBe(ALICE_FULL_MEMBER);
-    expect(result.scheme).toContain("raw");
+    expect(result.scheme).toBe("raw");
     expect(result.account).toBeUndefined();
   });
 
@@ -348,6 +372,18 @@ describe("dot verifiable member (legacy and raw tiers)", { timeout: 20_000 }, ()
     expect(stderr).toContain("exactly 32 bytes");
   });
 
+  test("--entropy rejects non-hex input", async () => {
+    // 32 characters of text are 32 bytes, but treating them as the secret would
+    // silently derive a key from a typo'd flag value.
+    const { stderr, exitCode } = await runCli([
+      "verifiable",
+      "--entropy",
+      "abcdefghabcdefghabcdefghabcdefgh",
+    ]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("0x-prefixed");
+  });
+
   // Tiers must never be combined: the result would be a valid-looking key from a
   // scheme the caller did not ask for, which only fails at ring-validation time.
   test.each([
@@ -358,6 +394,7 @@ describe("dot verifiable member (legacy and raw tiers)", { timeout: 20_000 }, ()
     ],
     [["--entropy-key", "candidate", "--product", "dim2.dot"], "cannot be combined with --product"],
     [["--person", "full", "--index", "3"], "--person already fixes the index"],
+    [["--person", "lite", "--product", "dim2.dot"], "cannot be combined with --product"],
   ])("rejects conflicting selectors %j", async (args, message) => {
     const { stderr, exitCode } = await runCli(["verifiable", "alice", ...(args as string[])]);
     expect(exitCode).toBe(1);
@@ -384,6 +421,8 @@ describe("dot verifiable alias / sign / prove / verify", { timeout: 20_000 }, ()
     const b = JSON.parse((await run()).stdout);
     expect(a.alias).toMatch(/^0x[0-9a-f]{64}$/);
     expect(a.context).toBe("dotns");
+    // Every command reports the scheme: a wrong-tier key is otherwise invisible.
+    expect(a.scheme).toBe("rfc-0022");
     expect(a.alias).toBe(b.alias);
   });
 
@@ -404,6 +443,7 @@ describe("dot verifiable alias / sign / prove / verify", { timeout: 20_000 }, ()
       ).stdout,
     );
     expect(signed.type).toBe("Bandersnatch");
+    expect(signed.scheme).toBe("rfc-0022");
     expect(signed.signature).toMatch(/^0x[0-9a-f]{128}$/);
 
     const ok = await runCli([

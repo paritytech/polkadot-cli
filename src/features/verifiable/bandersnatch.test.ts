@@ -149,10 +149,12 @@ describe("deriveBandersnatchMember", () => {
     );
   });
 
-  test("parseRawEntropy accepts exactly 32 bytes", () => {
+  test("parseRawEntropy accepts exactly 32 bytes of 0x-hex", () => {
     expect(parseRawEntropy(`0x${"11".repeat(32)}`).length).toBe(32);
     expect(() => parseRawEntropy("0xdead")).toThrow(/exactly 32 bytes/);
     expect(() => parseRawEntropy(`0x${"11".repeat(33)}`)).toThrow(/exactly 32 bytes/);
+    // Text input is rejected outright — 32 characters would otherwise pass as bytes.
+    expect(() => parseRawEntropy("a".repeat(32))).toThrow(/0x-prefixed/);
   });
 
   test("a --product override derives a different key than the reserved id", () => {

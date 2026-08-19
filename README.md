@@ -2014,8 +2014,9 @@ command names the scheme it used in its output.
   **`lite`** is `//peopl.dot//1`, ring `pop:polkadot.network/people-lite`. Two keys
   held at the same time, not a rotation.
 - **`--product <id> --index <n>`** — any path in the RFC-0022 ring-VRF tree, for other
-  products (`dim2.dot`, `uid.dot`, …) or other indices. `--index 1` alone is the same
-  as `--person lite`.
+  products (`dim2.dot`, `uid.dot`, …) or other indices. `--index` defaults to `0`;
+  `--index 1` alone is the same key as `--person lite`. Combining `--product` with
+  `--person` is an error — the full/lite names belong to `peopl.dot`.
 - **`--entropy-key`** — the pre-RFC-0022 scheme: a single keyed blake2b over the BIP39
   entropy, `candidate` for a full person and omitted for lite. Kept because the
   reference apps cut over without migrating, so identities registered before the switch
@@ -2028,7 +2029,9 @@ command names the scheme it used in its output.
   namespace (e.g. `"dotns"`), zero-padded right to 32 bytes like Solidity `bytes32()`.
   It determines the alias and is named `context` across the runtime
   (`type Context = [u8;32]`), the iOS client, and verifiablejs. Used by
-  `alias` / `prove` / `verify`, and plays no part in deriving the key.
+  `alias` / `prove` / `verify`, and plays no part in deriving the key. On `member`
+  it is rejected outright: it once selected the legacy entropy key there, and
+  silently ignoring it would hand a pre-cutover caller the wrong key.
 
 The product id is `peopl.dot` on **every** network — a governance-reserved dotNS
 constant that the reference apps pin regardless of chain (Android's `ProductId` regex
@@ -2045,6 +2048,10 @@ cannot even express a non-`.dot` TLD). The network axis for personhood lives in 
 > The reference apps cut over without migrating existing installs, so an identity
 > registered under the old scheme keeps its old key on-chain until the runtime's
 > `migrate_included_key` moves it. Reproduce that key with `--entropy-key`.
+>
+> Deriving a key also renames the two entries the old `dot account create` stored
+> (`""` and `"candidate"`) to `legacy:` / `legacy:candidate` in `accounts.json`,
+> so `account inspect` can no longer present them as current keys.
 
 #### Member keys
 

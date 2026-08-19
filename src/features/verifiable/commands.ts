@@ -151,7 +151,11 @@ function resolveKeySource(opts: VerifiableOpts): KeySource {
         `--entropy is the member secret itself, so it cannot be combined with ${conflicts.join(", ")}.`,
       );
     }
-    return { kind: "raw", entropy: parseRawEntropy(opts.entropy) };
+    try {
+      return { kind: "raw", entropy: parseRawEntropy(opts.entropy) };
+    } catch (err) {
+      throw new CliError(`Invalid --entropy: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   if (opts.entropyKey !== undefined) {
@@ -164,6 +168,13 @@ function resolveKeySource(opts: VerifiableOpts): KeySource {
     return { kind: "legacy", entropyKey: opts.entropyKey };
   }
 
+  if (opts.person !== undefined && opts.product !== undefined) {
+    throw new CliError(
+      `--person names the well-known ${PERSONHOOD_PRODUCT_ID} keys, so it cannot be ` +
+        `combined with --product. Use --index (full=0, lite=1) to pick the key under ` +
+        `a different product.`,
+    );
+  }
   if (opts.person !== undefined && opts.index !== undefined) {
     throw new CliError(
       `--person already fixes the index (full=0, lite=1). Use --index on its own, ` +
@@ -171,17 +182,24 @@ function resolveKeySource(opts: VerifiableOpts): KeySource {
     );
   }
 
-  const productId = opts.product ?? PERSONHOOD_PRODUCT_ID;
-
-  if (opts.index !== undefined) {
-    return { kind: "tree", productId, index: parseIndex(opts.index) };
+  if (opts.product !== undefined || opts.index !== undefined) {
+    return {
+      kind: "tree",
+      productId: opts.product ?? PERSONHOOD_PRODUCT_ID,
+      index: opts.index !== undefined ? parseIndex(opts.index) : 0,
+    };
   }
 
   const person = opts.person ?? "full";
   if (!isPersonKind(person)) {
     throw new CliError(`Invalid --person "${person}". Supported: full, lite.`);
   }
-  return { kind: "tree", productId, index: PERSON_INDEX[person], person };
+  return {
+    kind: "tree",
+    productId: PERSONHOOD_PRODUCT_ID,
+    index: PERSON_INDEX[person],
+    person,
+  };
 }
 
 /** Whether this source needs an account at all — raw entropy stands alone. */
@@ -189,21 +207,31 @@ function sourceNeedsAccount(source: KeySource): boolean {
   return source.kind !== "raw";
 }
 
+/** Member entropy for a mnemonic-backed source (every tier except raw). */
+function entropyFromMnemonic(
+  source: Exclude<KeySource, { kind: "raw" }>,
+  mnemonic: string,
+): Uint8Array {
+  return source.kind === "legacy"
+    ? deriveLegacyMemberEntropy(mnemonic, resolveEntropyKey(source.entropyKey))
+    : deriveRingVrfEntropy(mnemonic, source.productId, source.index);
+}
+
 async function entropyForSource(
   source: KeySource,
   account: string | undefined,
 ): Promise<Uint8Array> {
   if (source.kind === "raw") return source.entropy;
-  const mnemonic = await resolveMnemonic(account!);
-  if (source.kind === "legacy") {
-    return deriveLegacyMemberEntropy(mnemonic, resolveEntropyKey(source.entropyKey));
-  }
-  return deriveRingVrfEntropy(mnemonic, source.productId, source.index);
+  return entropyFromMnemonic(source, await resolveMnemonic(account!));
 }
 
-/** Human-readable description of what produced the key, for output and JSON. */
+/**
+ * What produced the key, for output and JSON. `scheme` is a stable machine
+ * identifier (the JSON contract); `schemeLabel` is the display form.
+ */
 interface SourceDescription {
-  scheme: string;
+  scheme: "rfc-0022" | "legacy" | "raw";
+  schemeLabel: string;
   product?: string;
   path?: string;
   person?: string;
@@ -213,16 +241,18 @@ interface SourceDescription {
 function describeSource(source: KeySource): SourceDescription {
   switch (source.kind) {
     case "raw":
-      return { scheme: "raw (caller-supplied entropy)" };
+      return { scheme: "raw", schemeLabel: "raw (caller-supplied entropy)" };
     case "legacy":
       return {
-        scheme: "legacy keyed-hash (pre-RFC-0022)",
+        scheme: "legacy",
+        schemeLabel: "legacy keyed-hash (pre-RFC-0022)",
         // An empty --entropy-key is the unkeyed (lite) variant, not a key of "".
         entropyKey: source.entropyKey ? source.entropyKey : "(unkeyed)",
       };
     default:
       return {
-        scheme: "RFC-0022 ring-VRF",
+        scheme: "rfc-0022",
+        schemeLabel: "RFC-0022 ring-VRF",
         product: source.productId,
         path: `//${source.productId}//${source.index}`,
         ...(source.person ? { person: source.person } : {}),
@@ -230,18 +260,23 @@ function describeSource(source: KeySource): SourceDescription {
   }
 }
 
+/** JSON-facing fields of a source description — everything but the display label. */
+function sourceJson({ schemeLabel: _label, ...fields }: SourceDescription) {
+  return fields;
+}
+
 /**
- * Resolve an account + selector flags to the member secret. Raw entropy needs no
- * account; every other tier does.
+ * Resolve an account + selector flags to the member secret and its description.
+ * Raw entropy needs no account; every other tier does.
  */
 async function resolveEntropy(
   account: string | undefined,
   opts: VerifiableOpts,
   action: string,
-): Promise<Uint8Array> {
+): Promise<{ entropy: Uint8Array; described: SourceDescription }> {
   const source = resolveKeySource(opts);
   if (sourceNeedsAccount(source)) requireAccount(account, action);
-  return entropyForSource(source, account);
+  return { entropy: await entropyForSource(source, account), described: describeSource(source) };
 }
 
 function requireAccount(account: string | undefined, action: string): string {
@@ -312,7 +347,38 @@ function bandersnatchEntryKey(source: KeySource): string | undefined {
   }
 }
 
+/**
+ * Rename the two entries pre-RFC-0022 `account create` wrote (`""` unkeyed,
+ * `"candidate"`) to their labelled tier-3 names, so they cannot be mistaken for
+ * current keys. Values are untouched — they equal what `--entropy-key` derives.
+ */
+function migrateStoredEntries(bandersnatch: Record<string, string>): boolean {
+  let changed = false;
+  for (const [oldKey, newKey] of [
+    ["", "legacy:"],
+    ["candidate", "legacy:candidate"],
+  ] as const) {
+    const value = bandersnatch[oldKey];
+    if (value !== undefined) {
+      bandersnatch[newKey] ??= value;
+      delete bandersnatch[oldKey];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 async function deriveMember(accountArg: string | undefined, opts: VerifiableOpts) {
+  // `--context` once selected the legacy entropy key on this command; today it is
+  // the ring/proof namespace and plays no part in key derivation. Rejecting it
+  // beats silently deriving the RFC-0022 key for a caller who meant the legacy one.
+  if (opts.context !== undefined) {
+    throw new CliError(
+      `--context plays no part in member-key derivation. For the pre-RFC-0022 ` +
+        `scheme it used to select here, pass --entropy-key ${opts.context} instead.`,
+    );
+  }
+
   const source = resolveKeySource(opts);
   const needsAccount = sourceNeedsAccount(source);
   const account = needsAccount ? requireAccount(accountArg, "member") : accountArg;
@@ -331,10 +397,7 @@ async function deriveMember(accountArg: string | undefined, opts: VerifiableOpts
     accountsFile = await loadAccounts();
     stored = findAccount(accountsFile, account!);
     const mnemonic = mnemonicFromStored(stored, account!, accountsFile);
-    entropy =
-      source.kind === "legacy"
-        ? deriveLegacyMemberEntropy(mnemonic, resolveEntropyKey(source.entropyKey))
-        : deriveRingVrfEntropy(mnemonic, source.productId, source.index);
+    entropy = entropyFromMnemonic(source, mnemonic);
   }
 
   const memberKeyHex = publicKeyToHex(deriveMemberKey(entropy));
@@ -343,15 +406,21 @@ async function deriveMember(accountArg: string | undefined, opts: VerifiableOpts
   const entryKey = bandersnatchEntryKey(source);
   if (stored && accountsFile && entryKey !== undefined) {
     if (!stored.bandersnatch) stored.bandersnatch = {};
+    let changed = migrateStoredEntries(stored.bandersnatch);
     if (stored.bandersnatch[entryKey] !== memberKeyHex) {
       stored.bandersnatch[entryKey] = memberKeyHex;
-      await saveAccounts(accountsFile);
+      changed = true;
     }
+    if (changed) await saveAccounts(accountsFile);
   }
 
   if (isJsonOutput(opts)) {
     console.log(
-      formatJson({ ...(account ? { account } : {}), ...described, memberKey: memberKeyHex }),
+      formatJson({
+        ...(account ? { account } : {}),
+        ...sourceJson(described),
+        memberKey: memberKeyHex,
+      }),
     );
   } else {
     // Pad past the longest label ("Entropy Key:", 12) so every value lines up
@@ -363,7 +432,7 @@ async function deriveMember(accountArg: string | undefined, opts: VerifiableOpts
     if (account) row("Account", account);
     // Always state the scheme: a key from the wrong tier looks identical, and the
     // only signal that it will not validate against a ring is this line.
-    row("Scheme", described.scheme);
+    row("Scheme", described.schemeLabel);
     if (described.person) row("Person", described.person);
     if (described.path) row("Path", described.path);
     if (described.entropyKey) row("Entropy Key", described.entropyKey);
@@ -372,34 +441,36 @@ async function deriveMember(accountArg: string | undefined, opts: VerifiableOpts
   }
 }
 
-async function deriveAliasCmd(accountArg: string | undefined, opts: VerifiableOpts) {
+async function deriveAliasCmd(account: string | undefined, opts: VerifiableOpts) {
   const contextStr = requireOption(opts.context, "--context", "alias");
-  const entropy = await resolveEntropy(accountArg, opts, "alias");
-  const account = accountArg;
+  const { entropy, described } = await resolveEntropy(account, opts, "alias");
   const context = encodeContext(contextStr);
   const aliasHex = toHex(deriveAlias(entropy, context));
 
   if (isJsonOutput(opts)) {
-    console.log(formatJson({ account, context: contextStr, alias: aliasHex }));
+    console.log(
+      formatJson({ account, scheme: described.scheme, context: contextStr, alias: aliasHex }),
+    );
   } else {
     printHeading("Verifiable Alias");
-    console.log(`  ${BOLD}Account:${RESET} ${account}`);
+    if (account) console.log(`  ${BOLD}Account:${RESET} ${account}`);
+    console.log(`  ${BOLD}Scheme:${RESET}  ${described.schemeLabel}`);
     console.log(`  ${BOLD}Context:${RESET} ${contextStr}`);
     console.log(`  ${BOLD}Alias:${RESET}   ${aliasHex}`);
     console.log();
   }
 }
 
-async function signCmd(accountArg: string | undefined, opts: VerifiableOpts) {
+async function signCmd(account: string | undefined, opts: VerifiableOpts) {
   const message = await resolveMessage(opts);
-  const entropy = await resolveEntropy(accountArg, opts, "sign");
-  const account = accountArg;
+  const { entropy, described } = await resolveEntropy(account, opts, "sign");
   const signature = bandersnatchSign(entropy, message);
   const member = deriveMemberKey(entropy);
   const sigHex = toHex(signature);
   const result = {
     type: "Bandersnatch",
     account,
+    scheme: described.scheme,
     message: toHex(message),
     signature: sigHex,
     member: toHex(member),
@@ -410,6 +481,7 @@ async function signCmd(accountArg: string | undefined, opts: VerifiableOpts) {
     console.log(formatJson(result));
   } else {
     console.log(`  ${BOLD}Type:${RESET}       ${result.type}`);
+    console.log(`  ${BOLD}Scheme:${RESET}     ${described.schemeLabel}`);
     console.log(`  ${BOLD}Message:${RESET}    ${result.message}`);
     console.log(`  ${BOLD}Signature:${RESET}  ${result.signature}`);
     console.log(`  ${BOLD}Member:${RESET}     ${result.member}`);
@@ -417,19 +489,19 @@ async function signCmd(accountArg: string | undefined, opts: VerifiableOpts) {
   }
 }
 
-async function proveCmd(accountArg: string | undefined, opts: VerifiableOpts) {
+async function proveCmd(account: string | undefined, opts: VerifiableOpts) {
   const contextStr = requireOption(opts.context, "--context", "prove");
   const membersArg = requireOption(opts.members, "--members", "prove");
   const message = await resolveMessage(opts);
   const ringExponent = resolveRingExponent(opts);
-  const entropy = await resolveEntropy(accountArg, opts, "prove");
-  const account = accountArg;
+  const { entropy, described } = await resolveEntropy(account, opts, "prove");
   const context = encodeContext(contextStr);
   const members = await resolveBytesArg(membersArg, "--members", true);
 
   const { proof, alias } = ringProve(ringExponent, entropy, members, context, message);
   const result = {
     account,
+    scheme: described.scheme,
     context: contextStr,
     ringExponent,
     alias: toHex(alias),
@@ -440,7 +512,8 @@ async function proveCmd(accountArg: string | undefined, opts: VerifiableOpts) {
     console.log(formatJson(result));
   } else {
     printHeading("Ring-VRF Proof");
-    console.log(`  ${BOLD}Account:${RESET}       ${account}`);
+    if (account) console.log(`  ${BOLD}Account:${RESET}       ${account}`);
+    console.log(`  ${BOLD}Scheme:${RESET}        ${described.schemeLabel}`);
     console.log(`  ${BOLD}Context:${RESET}       ${contextStr}`);
     console.log(`  ${BOLD}Ring exponent:${RESET} ${ringExponent}`);
     console.log(`  ${BOLD}Alias:${RESET}         ${result.alias}`);

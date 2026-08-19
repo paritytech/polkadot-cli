@@ -33,6 +33,7 @@ ${BOLD}Where the member secret comes from (four tiers, pick one):${RESET}
   2. --product <id> --index <n>
                             ${BOLD}Any${RESET} RFC-0022 tree path: //<id>//index_bytes(n).
                             For other products (dim2.dot, uid.dot, …) or indices.
+                            --index defaults to 0; --person cannot be combined.
   3. --entropy-key <k>      ${BOLD}Legacy${RESET} pre-RFC-0022 scheme: one keyed blake2b over
                             the BIP39 entropy ("candidate" = full, omitted = lite).
                             For identities registered before the cutover, which
@@ -47,7 +48,8 @@ ${BOLD}Not a key input — do not conflate:${RESET}
   --context <text|0xhex>
         The 32-byte ring/proof namespace (e.g. "dotns"), zero-padded right to 32
         bytes like Solidity bytes32(). Determines the alias. Used by alias/prove/verify.
-        It plays NO part in key derivation.
+        It plays NO part in key derivation — on member it is an error (it once
+        selected the legacy entropy key there; that is --entropy-key now).
 
 ${BOLD}Options:${RESET}
   --person <full|lite>  Personhood key to derive (default: full)

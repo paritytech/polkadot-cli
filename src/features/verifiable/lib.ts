@@ -120,7 +120,9 @@ export function derivationIndex32(index: number): Uint8Array {
  *
  * Rejects all-digit segments: Substrate encodes those as `u64` rather than as a
  * string, so a numeric product id would silently derive a different key. RFC-0022
- * requires product ids to be non-numeric for exactly this reason.
+ * itself never produces one — product ids are dotNS names (the reference apps'
+ * `ProductId` pattern requires letters) — so an all-digit segment is always a
+ * caller mistake, not a valid path.
  */
 export function hardChainCode(segment: string): Uint8Array {
   if (segment.length === 0) {
@@ -227,9 +229,12 @@ export function deriveLegacyMemberEntropy(mnemonic: string, entropyKey?: Uint8Ar
  * unhashed `member_from_entropy(bip39Entropy)` form — without an account.
  */
 export function parseRawEntropy(value: string): Uint8Array {
+  if (!value.startsWith("0x")) {
+    throw new Error("raw entropy must be 0x-prefixed hex (64 hex chars)");
+  }
   const bytes = textOrHexBytes(value, "entropy");
   if (bytes.length !== 32) {
-    throw new Error(`--entropy must be exactly 32 bytes (got ${bytes.length})`);
+    throw new Error(`raw entropy must be exactly 32 bytes (got ${bytes.length})`);
   }
   return bytes;
 }

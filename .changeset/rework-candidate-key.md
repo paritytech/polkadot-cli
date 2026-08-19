@@ -17,7 +17,9 @@ Member keys now default to the ring-VRF keyed-hash tree the reference apps use: 
 
 The legacy tier is kept deliberately. The reference apps cut over without migrating existing installs, so an identity registered before the switch still holds its old key on-chain until `migrate_included_key` moves it — reproducing that key is exactly what a debugging CLI is for. The raw tier needs no account at all, so `sign`, `alias`, and `prove` work with a secret produced by any other implementation.
 
-Because a key from the wrong tier is indistinguishable until it fails ring validation, every command now prints the `Scheme:` it used, and mixing selector flags is an error rather than a precedence rule.
+Because a key from the wrong tier is indistinguishable until it fails ring validation, every command now prints the `Scheme:` it used (JSON gets a stable `scheme` id: `rfc-0022` | `legacy` | `raw`), and mixing selector flags — including `--person` with `--product` — is an error rather than a precedence rule. For the same reason, `member` now rejects `--context` (it once selected the entropy key there; the error points at `--entropy-key`), and `--entropy` accepts only `0x`-hex, never text.
+
+Deriving a key also renames the two entries the old `dot account create` stored (`""` and `"candidate"`) to `legacy:` / `legacy:candidate` in `accounts.json`, so `account inspect` can no longer present pre-RFC-0022 keys as current ones.
 
 The product id stays `peopl.dot` on **every** network. It is a governance-reserved dotNS constant that iOS and Android both pin regardless of chain (Android's `ProductId` regex cannot even express a non-`.dot` TLD), and the network axis for personhood lives in the ring — `chainId` plus collection id — not in the key. `--product` overrides it for clients that deliberately diverge. All-digit ids are rejected, since Substrate SCALE-encodes numeric junctions as `u64` and would otherwise silently derive a different key.
 
