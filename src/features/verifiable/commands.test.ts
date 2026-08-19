@@ -28,43 +28,40 @@ describe("dot verifiable", { timeout: 15_000 }, () => {
     const { stdout, exitCode } = await runCli(["verifiable"]);
     expect(exitCode).toBe(0);
     expect(stdout).toContain("dot verifiable");
-    expect(stdout).toContain("--entropy-key");
+    expect(stdout).toContain("--person");
   });
 
-  test("alice (unkeyed) derives member key", async () => {
+  test("alice derives the full member key by default", async () => {
     const { stdout, exitCode } = await runCli(["verifiable", "alice"]);
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Bandersnatch Member Key");
-    expect(stdout).toContain("Account:");
+    expect(stdout).toContain("Person:     full");
+    expect(stdout).toContain("Path:       //peopl.dot//0");
     expect(stdout).toContain("Member Key:");
-    expect(stdout).toContain("0x");
-    // Should NOT show separate Context: line for unkeyed (only Member Key:)
+    // The ring context is not part of key derivation, so it must not appear here.
     expect(stdout).not.toMatch(/^\s+Context:/m);
   });
 
-  test("alice --context candidate derives keyed member key", async () => {
-    const { stdout, exitCode } = await runCli(["verifiable", "alice", "--context", "candidate"]);
+  test("alice --person lite derives the lite member key", async () => {
+    const { stdout, exitCode } = await runCli(["verifiable", "alice", "--person", "lite"]);
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("Bandersnatch Member Key");
-    expect(stdout).toContain("Context:    candidate");
+    expect(stdout).toContain("Person:     lite");
+    expect(stdout).toContain("Path:       //peopl.dot//1");
     expect(stdout).toContain("Member Key:");
   });
 
-  test("unkeyed and --context candidate produce different keys for alice", async () => {
-    const unkeyed = await runCli(["verifiable", "alice", "--output", "json"]);
-    const candidate = await runCli([
-      "verifiable",
-      "alice",
-      "--context",
-      "candidate",
-      "--output",
-      "json",
-    ]);
-    expect(unkeyed.exitCode).toBe(0);
-    expect(candidate.exitCode).toBe(0);
-    const unkeyedKey = JSON.parse(unkeyed.stdout).memberKey;
-    const candidateKey = JSON.parse(candidate.stdout).memberKey;
-    expect(unkeyedKey).not.toBe(candidateKey);
+  test("full and lite produce different keys for alice", async () => {
+    const full = await runCli(["verifiable", "alice", "--output", "json"]);
+    const lite = await runCli(["verifiable", "alice", "--person", "lite", "--output", "json"]);
+    expect(full.exitCode).toBe(0);
+    expect(lite.exitCode).toBe(0);
+    expect(JSON.parse(full.stdout).memberKey).not.toBe(JSON.parse(lite.stdout).memberKey);
+  });
+
+  test("invalid --person is rejected", async () => {
+    const { stderr, exitCode } = await runCli(["verifiable", "alice", "--person", "candidate"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("Invalid --person");
   });
 
   test("deterministic: same call produces same key", async () => {
@@ -101,37 +98,31 @@ describe("dot verifiable", { timeout: 15_000 }, () => {
     expect(stdout).toContain("Member Key:");
   });
 
-  test("stored account with --context candidate", async () => {
-    const { stdout, exitCode } = await runCli(
-      ["verifiable", "my-account", "--context", "candidate"],
-      { accounts: [STORED_ACCOUNT] },
-    );
+  test("stored account with --person lite", async () => {
+    const { stdout, exitCode } = await runCli(["verifiable", "my-account", "--person", "lite"], {
+      accounts: [STORED_ACCOUNT],
+    });
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("Context:    candidate");
+    expect(stdout).toContain("Person:     lite");
   });
 
   test("JSON output has correct structure", async () => {
     const { stdout, exitCode } = await runCli([
       "verifiable",
       "alice",
-      "--context",
-      "candidate",
+      "--person",
+      "lite",
       "--output",
       "json",
     ]);
     expect(exitCode).toBe(0);
     const result = JSON.parse(stdout);
     expect(result.account).toBe("alice");
-    expect(result.context).toBe("candidate");
+    expect(result.person).toBe("lite");
+    expect(result.product).toBe("peopl.dot");
+    expect(result.path).toBe("//peopl.dot//1");
     expect(result.memberKey).toMatch(/^0x[0-9a-f]{64}$/);
-  });
-
-  test("JSON output without context omits context field", async () => {
-    const { stdout, exitCode } = await runCli(["verifiable", "alice", "--output", "json"]);
-    expect(exitCode).toBe(0);
-    const result = JSON.parse(stdout);
-    expect(result.account).toBe("alice");
-    expect(result.memberKey).toMatch(/^0x[0-9a-f]{64}$/);
+    // The ring context is a separate concept and never appears in member output.
     expect(result.context).toBeUndefined();
   });
 
@@ -158,32 +149,32 @@ describe("dot verifiable", { timeout: 15_000 }, () => {
     expect(stderr).toContain("BIP39 mnemonic");
   });
 
-  test("arbitrary --context string works", async () => {
+  test("--context does not affect member-key derivation", async () => {
+    const bare = await runCli(["verifiable", "alice", "--output", "json"]);
+    const withCtx = await runCli(["verifiable", "alice", "--context", "dotns", "--output", "json"]);
+    expect(JSON.parse(bare.stdout).memberKey).toBe(JSON.parse(withCtx.stdout).memberKey);
+  });
+
+  test("--product override derives a different key and reports the path", async () => {
     const { stdout, exitCode } = await runCli([
       "verifiable",
       "alice",
-      "--context",
-      "pps",
+      "--product",
+      "peopl.paseo",
       "--output",
       "json",
     ]);
     expect(exitCode).toBe(0);
     const result = JSON.parse(stdout);
-    expect(result.context).toBe("pps");
-    expect(result.memberKey).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(result.product).toBe("peopl.paseo");
+    expect(result.path).toBe("//peopl.paseo//0");
+    expect(result.memberKey).not.toBe(ALICE_FULL_MEMBER);
   });
 
-  test("different --context strings produce different member keys", async () => {
-    const candidate = await runCli([
-      "verifiable",
-      "alice",
-      "--context",
-      "candidate",
-      "--output",
-      "json",
-    ]);
-    const pps = await runCli(["verifiable", "alice", "--context", "pps", "--output", "json"]);
-    expect(JSON.parse(candidate.stdout).memberKey).not.toBe(JSON.parse(pps.stdout).memberKey);
+  test("all-digit --product is rejected", async () => {
+    const { stderr, exitCode } = await runCli(["verifiable", "alice", "--product", "123"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("must not be all digits");
   });
 
   // Pins the exact member keys produced by the underlying verifiablejs WASM
@@ -191,26 +182,17 @@ describe("dot verifiable", { timeout: 15_000 }, () => {
   // `verifiable` pallet expects, so a silent crypto/serialization change in the
   // library — like the wire-incompatible bump from beta.2 — fails this test.
   test("alice derives known member keys (verifiablejs wire format)", async () => {
-    const unkeyed = await runCli(["verifiable", "alice", "--output", "json"]);
-    const candidate = await runCli([
-      "verifiable",
-      "alice",
-      "--context",
-      "candidate",
-      "--output",
-      "json",
-    ]);
-    expect(JSON.parse(unkeyed.stdout).memberKey).toBe(
-      "0xbb6ee099b568f1844d62fc00e6305c2e83aa8da30ce59e664ef39e089204d43c",
-    );
-    expect(JSON.parse(candidate.stdout).memberKey).toBe(
-      "0x5f915576987547d3e55bb4129ac8cae1d338f8933073dc74272b4c825f738592",
+    const full = await runCli(["verifiable", "alice", "--output", "json"]);
+    const lite = await runCli(["verifiable", "alice", "--person", "lite", "--output", "json"]);
+    expect(JSON.parse(full.stdout).memberKey).toBe(ALICE_FULL_MEMBER);
+    expect(JSON.parse(lite.stdout).memberKey).toBe(
+      "0x9dc979d9e8d3861c55fc7a0a15b439b5f22b619dd3b2e76a62a78156b79273ea",
     );
   });
 
   test("saves bandersnatch key for stored accounts", async () => {
     // First derive
-    const derive = await runCli(["verifiable", "my-account", "--context", "candidate"], {
+    const derive = await runCli(["verifiable", "my-account", "--person", "lite"], {
       accounts: [STORED_ACCOUNT],
     });
     expect(derive.exitCode).toBe(0);
@@ -220,50 +202,50 @@ describe("dot verifiable", { timeout: 15_000 }, () => {
   });
 });
 
-const ALICE_FULL_MEMBER = "0x5f915576987547d3e55bb4129ac8cae1d338f8933073dc74272b4c825f738592";
+const ALICE_FULL_MEMBER = "0x69ef2ed666eb7bfabcf93b4360c59439a03d6de3cccf77a411fcaa7017caf4a3";
 
 // @ts-expect-error Bun supports describe(label, options, fn) at runtime
-describe("dot verifiable member (--entropy-key)", { timeout: 15_000 }, () => {
-  test("--entropy-key candidate matches the pinned full member key", async () => {
+describe("dot verifiable member (--person)", { timeout: 15_000 }, () => {
+  test("--person full matches the pinned full member key", async () => {
     const { stdout, exitCode } = await runCli([
       "verifiable",
       "member",
       "alice",
-      "--entropy-key",
-      "candidate",
+      "--person",
+      "full",
       "--output",
       "json",
     ]);
     expect(exitCode).toBe(0);
     const result = JSON.parse(stdout);
     expect(result.memberKey).toBe(ALICE_FULL_MEMBER);
-    expect(result.entropyKey).toBe("candidate");
-    expect(result.context).toBeUndefined();
+    expect(result.person).toBe("full");
   });
 
-  test("bare account still derives (back-compat) and --context warns on stderr", async () => {
-    const { stdout, stderr, exitCode } = await runCli([
+  // The pre-RFC-0022 flag must fail loudly: silently deriving a different key
+  // would produce proofs no ring accepts, which is far worse than an error.
+  test("--entropy-key is rejected with a pointer to --person", async () => {
+    const { stderr, exitCode } = await runCli([
       "verifiable",
       "alice",
-      "--context",
+      "--entropy-key",
       "candidate",
     ]);
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Member Key:");
-    expect(stderr).toContain("--entropy-key");
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("--person full");
   });
 });
 
 // @ts-expect-error Bun supports describe(label, options, fn) at runtime
 describe("dot verifiable alias / sign / prove / verify", { timeout: 20_000 }, () => {
-  test("alias is deterministic for (account, entropy-key, context)", async () => {
+  test("alias is deterministic for (account, person, context)", async () => {
     const run = () =>
       runCli([
         "verifiable",
         "alias",
         "alice",
-        "--entropy-key",
-        "candidate",
+        "--person",
+        "full",
         "--context",
         "dotns",
         "--output",
@@ -285,8 +267,8 @@ describe("dot verifiable alias / sign / prove / verify", { timeout: 20_000 }, ()
           "alice",
           "--message",
           "hello",
-          "--entropy-key",
-          "candidate",
+          "--person",
+          "full",
           "--output",
           "json",
         ])
@@ -332,8 +314,8 @@ describe("dot verifiable alias / sign / prove / verify", { timeout: 20_000 }, ()
           "verifiable",
           "prove",
           "alice",
-          "--entropy-key",
-          "candidate",
+          "--person",
+          "full",
           "--context",
           "dotns",
           "--message",
@@ -354,8 +336,8 @@ describe("dot verifiable alias / sign / prove / verify", { timeout: 20_000 }, ()
           "verifiable",
           "alias",
           "alice",
-          "--entropy-key",
-          "candidate",
+          "--person",
+          "full",
           "--context",
           "dotns",
           "--output",
@@ -393,8 +375,8 @@ describe("dot verifiable alias / sign / prove / verify", { timeout: 20_000 }, ()
           "verifiable",
           "prove",
           "alice",
-          "--entropy-key",
-          "candidate",
+          "--person",
+          "full",
           "--context",
           "dotns",
           "--message",

@@ -5,12 +5,11 @@ import {
   compactEncode,
   DEFAULT_RING_EXPONENT,
   deriveAlias,
-  deriveMemberEntropy,
   deriveMemberKey,
+  derivePersonEntropy,
   encodeContext,
   encodeMembers,
   isRingExponent,
-  resolveEntropyKey,
   ringProve,
   ringRoot,
   verifyBandersnatchSig,
@@ -66,45 +65,30 @@ describe("encodeMembers", () => {
   });
 });
 
-describe("resolveEntropyKey", () => {
-  test("empty / undefined → undefined (lite)", () => {
-    expect(resolveEntropyKey(undefined)).toBeUndefined();
-    expect(resolveEntropyKey("")).toBeUndefined();
-  });
-
-  test('"candidate" → UTF-8 bytes', () => {
-    expect(toHex(resolveEntropyKey("candidate")!)).toBe("0x63616e646964617465");
-  });
-
-  test("0x hex → raw bytes", () => {
-    expect(toHex(resolveEntropyKey("0xdead")!)).toBe("0xdead");
-  });
-});
-
 describe("member entropy derivation", () => {
   test("is deterministic and 32 bytes", () => {
-    const e1 = deriveMemberEntropy(DEV_PHRASE);
-    const e2 = deriveMemberEntropy(DEV_PHRASE);
+    const e1 = derivePersonEntropy(DEV_PHRASE, "full");
+    const e2 = derivePersonEntropy(DEV_PHRASE, "full");
     expect(e1.length).toBe(32);
     expect(toHex(e1)).toBe(toHex(e2));
   });
 
-  test("lite (unkeyed) and full (candidate-keyed) differ", () => {
-    const lite = deriveMemberEntropy(DEV_PHRASE);
-    const full = deriveMemberEntropy(DEV_PHRASE, resolveEntropyKey("candidate"));
-    expect(toHex(lite)).not.toBe(toHex(full));
+  test("full and lite differ", () => {
+    expect(toHex(derivePersonEntropy(DEV_PHRASE, "full"))).not.toBe(
+      toHex(derivePersonEntropy(DEV_PHRASE, "lite")),
+    );
   });
 
   test("member key is 32 bytes and stable", () => {
-    const member = deriveMemberKey(deriveMemberEntropy(DEV_PHRASE));
+    const member = deriveMemberKey(derivePersonEntropy(DEV_PHRASE, "full"));
     expect(member.length).toBe(32);
-    expect(toHex(member)).toBe(toHex(deriveMemberKey(deriveMemberEntropy(DEV_PHRASE))));
+    expect(toHex(member)).toBe(toHex(deriveMemberKey(derivePersonEntropy(DEV_PHRASE, "full"))));
   });
 });
 
 describe("bandersnatch sign / verify", () => {
   test("round-trips and rejects a tampered message", () => {
-    const entropy = deriveMemberEntropy(DEV_PHRASE);
+    const entropy = derivePersonEntropy(DEV_PHRASE, "full");
     const member = deriveMemberKey(entropy);
     const msg = new TextEncoder().encode("hello");
     const sig = bandersnatchSign(entropy, msg);
@@ -116,7 +100,7 @@ describe("bandersnatch sign / verify", () => {
 });
 
 describe("ring proof", () => {
-  const entropy = deriveMemberEntropy(DEV_PHRASE, resolveEntropyKey("candidate"));
+  const entropy = derivePersonEntropy(DEV_PHRASE, "full");
   const member = deriveMemberKey(entropy);
   const members = encodeMembers([member]);
   const context = encodeContext("dotns");

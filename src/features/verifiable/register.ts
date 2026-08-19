@@ -10,7 +10,7 @@ import { BOLD, RESET, readRawOptionValue, withHelp } from "../../platform/index.
 
 const VERIFIABLE_HELP = `
 ${BOLD}Usage:${RESET}
-  $ dot verifiable [account] [--entropy-key <key>]       Derive the member key (default action)
+  $ dot verifiable [account] [--person full|lite]        Derive the member key (default action)
   $ dot verifiable <action> [account] [options]
 
 ${BOLD}Actions:${RESET}
@@ -26,18 +26,22 @@ ${BOLD}Actions:${RESET}
   on success they print the recovered alias / {"valid":true}.
 
 ${BOLD}Key concepts (do not conflate these):${RESET}
-  --entropy-key <text|0xhex>
-        Key mixed into the keyed-blake2b that turns your mnemonic into the
-        Bandersnatch member entropy. Omit for a ${BOLD}lite${RESET} person (unkeyed);
-        use "candidate" for a ${BOLD}full${RESET} person. Must match the key used when the
-        member was recognised on-chain, or you derive a different (unrecognised)
-        member key. It is NOT a derivation path and NOT the ring --context.
+  --person full|lite
+        Which personhood key to derive (RFC-0022). ${BOLD}full${RESET} (default) is
+        //peopl.dot//0, the "PoP" key in ring pop:polkadot.network/people;
+        ${BOLD}lite${RESET} is //peopl.dot//1, ring pop:polkadot.network/people-lite.
+        Two keys held at once, not a rotation. Must match the one registered
+        on-chain, or you derive a different (unrecognised) member key.
   --context <text|0xhex>
         The 32-byte ring/proof namespace (e.g. "dotns"), zero-padded right to 32
         bytes like Solidity bytes32(). Determines the alias. Used by alias/prove/verify.
+        It is NOT part of key derivation.
 
 ${BOLD}Options:${RESET}
-  --entropy-key <key>   Entropy-derivation key (see above)
+  --person <full|lite>  Which personhood key to derive (default: full)
+  --product <id>        Override the reserved product id (default: peopl.dot).
+                        Escape hatch only — the reference apps pin peopl.dot on
+                        every network, so a different id derives a key no ring has.
   --context <value>     32-byte ring context (alias/prove/verify)
   --message <data>      Message to sign / bind / verify (text or 0x hex)
   --file <path>         Read the message from a file (raw bytes)
@@ -51,26 +55,29 @@ ${BOLD}Options:${RESET}
   --output json         Output as JSON
 
 ${BOLD}Examples:${RESET}
-  $ dot verifiable alice                                 Lite member key
-  $ dot verifiable alice --entropy-key candidate         Full member key
-  $ dot verifiable alias alice --entropy-key candidate --context dotns
-  $ dot verifiable sign alice --message "hello" --entropy-key candidate
-  $ dot verifiable prove alice --entropy-key candidate --context dotns \\
-      --message 0x… --members 0x…
+  $ dot verifiable alice                                 Full member key
+  $ dot verifiable alice --person lite                   Lite member key
+  $ dot verifiable alias alice --context dotns
+  $ dot verifiable sign alice --message "hello"
+  $ dot verifiable prove alice --context dotns --message 0x… --members 0x…
   $ dot verifiable verify --proof 0x… --context dotns --message 0x… --members 0x…
   $ dot verifiable members 0x… 0x…
 
-${BOLD}Derivation flow:${RESET}
+${BOLD}Derivation flow (RFC-0022, hard junctions only):${RESET}
 
-  Mnemonic ─BIP39─▶ entropy ─keyed blake2b─▶ member entropy ─▶ member key / secret
-                              (key = --entropy-key)                  │
-                                                  ring proof: one_shot(…, --context, --message)
+  Mnemonic ─BIP39─▶ entropy ─┬─ blake2b(key "ring-vrf")        tree root
+                             ├─ blake2b(key cc("//peopl.dot")) product node   (--product)
+                             └─ blake2b(key index_bytes(0|1))  member entropy (--person)
+                                                     │
+                                    ring proof: one_shot(…, --context, --message)
 `.trimStart();
 
 export interface VerifiableOpts {
   output?: string;
   json?: boolean;
-  entropyKey?: string;
+  entropyKey?: string; // removed flag: retained so the handler can reject it with a pointer
+  person?: string;
+  product?: string;
   context?: string;
   message?: string;
   file?: string;
@@ -86,6 +93,8 @@ export interface VerifiableOpts {
 /** Flags whose values may be 0x-hex and must survive mri's numeric coercion. */
 const RAW_STRING_FLAGS: Array<[string, keyof VerifiableOpts]> = [
   ["entropy-key", "entropyKey"],
+  ["person", "person"],
+  ["product", "product"],
   ["context", "context"],
   ["message", "message"],
   ["members", "members"],
@@ -101,7 +110,9 @@ export function registerVerifiableCommands(cli: CAC) {
       "verifiable [action] [...rest]",
       "Bandersnatch member keys, ring-VRF proofs, signing and verification",
     )
-    .option("--entropy-key <key>", "Entropy-derivation key (omit = lite, 'candidate' = full)")
+    .option("--person <kind>", "Personhood key to derive: full (default) or lite")
+    .option("--product <id>", "Override the reserved product id (default: peopl.dot)")
+    .option("--entropy-key <key>", "Removed — use --person full|lite")
     .option("--context <value>", "32-byte ring/proof context (alias/prove/verify)")
     .option("--message <data>", "Message to sign/bind/verify (text or 0x hex)")
     .option("--file <path>", "Read message from a file (raw bytes)")

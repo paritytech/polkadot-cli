@@ -19,7 +19,9 @@ export interface StoredAccount {
   publicKey: string; // hex 0x-prefixed, 32 bytes (may be "" for deferred env accounts)
   derivationPath: string; // "" for root
   source?: AccountSource;
-  bandersnatch?: Record<string, string>; // key (""=unkeyed) → hex member key
+  // RFC-0022 ring-VRF member keys: "full" = //peopl.dot//0, "lite" = //peopl.dot//1.
+  // A --product override stores under "<productId>/<index>".
+  bandersnatch?: Record<string, string>;
 }
 
 export function isWatchOnly(account: StoredAccount): boolean {

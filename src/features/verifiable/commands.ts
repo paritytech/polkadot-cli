@@ -25,13 +25,15 @@ import {
   bandersnatchSign,
   DEFAULT_RING_EXPONENT,
   deriveAlias,
-  deriveBandersnatchMember,
-  deriveMemberEntropy,
   deriveMemberKey,
+  derivePersonEntropy,
   encodeContext,
   encodeMembers,
+  isPersonKind,
   isRingExponent,
-  resolveEntropyKey,
+  PERSON_INDEX,
+  PERSONHOOD_PRODUCT_ID,
+  type PersonKind,
   ringProve,
   verifyBandersnatchSig,
   verifyRingProof,
@@ -106,12 +108,30 @@ async function resolveMnemonic(account: string): Promise<string> {
   return mnemonicFromStored(findAccount(accountsFile, account), account, accountsFile);
 }
 
-async function resolveEntropy(
-  account: string,
-  entropyKey: string | undefined,
-): Promise<Uint8Array> {
+/**
+ * Resolve `--person` / `--product`. `--entropy-key` was the pre-RFC-0022 flag and
+ * is rejected with a pointer rather than ignored: silently deriving a different
+ * key than the caller asked for would produce proofs no ring accepts.
+ */
+function resolvePersonSelector(opts: VerifiableOpts): { person: PersonKind; productId: string } {
+  if (opts.entropyKey !== undefined) {
+    throw new CliError(
+      `"--entropy-key" was removed: member keys now follow RFC-0022 ` +
+        `(//${PERSONHOOD_PRODUCT_ID}//index). Use "--person full" (was ` +
+        `"--entropy-key candidate") or "--person lite" (was unkeyed).`,
+    );
+  }
+  const value = opts.person ?? "full";
+  if (!isPersonKind(value)) {
+    throw new CliError(`Invalid --person "${value}". Supported: full, lite.`);
+  }
+  return { person: value, productId: opts.product ?? PERSONHOOD_PRODUCT_ID };
+}
+
+async function resolveEntropy(account: string, opts: VerifiableOpts): Promise<Uint8Array> {
+  const { person, productId } = resolvePersonSelector(opts);
   const mnemonic = await resolveMnemonic(account);
-  return deriveMemberEntropy(mnemonic, resolveEntropyKey(entropyKey));
+  return derivePersonEntropy(mnemonic, person, productId);
 }
 
 function requireAccount(account: string | undefined, action: string): string {
@@ -163,30 +183,18 @@ function requireOption(value: string | undefined, flag: string, action: string):
 
 // --- Actions ---
 
+/**
+ * Accounts-file key for a derived member key. The two reserved personhood keys
+ * store as `full` / `lite`; a `--product` override stores under its full path so
+ * it can never be mistaken for one of them.
+ */
+export function bandersnatchEntryKey(person: PersonKind, productId: string): string {
+  return productId === PERSONHOOD_PRODUCT_ID ? person : `${productId}/${PERSON_INDEX[person]}`;
+}
+
 async function deriveMember(accountArg: string | undefined, opts: VerifiableOpts) {
   const account = requireAccount(accountArg, "member");
-
-  // Migration: `--context` used to mean the entropy-derivation key on this
-  // command. It now means the 32-byte ring context elsewhere. Preserve old
-  // behavior here for one release, with a deprecation warning.
-  const usedDeprecatedContext = opts.entropyKey === undefined && opts.context !== undefined;
-  if (usedDeprecatedContext) {
-    if (opts.context!.startsWith("0x")) {
-      // The previous release mangled 0x values before hashing (mri coerced
-      // them to numbers), so carrying them through would silently derive a
-      // different member key than either release. Require the explicit flag.
-      throw new CliError(
-        `"--context" on "dot verifiable" now means the 32-byte ring context, and hex ` +
-          `entropy keys changed meaning in this release. Pass "--entropy-key ${opts.context}" explicitly.`,
-      );
-    }
-    process.stderr.write(
-      `Warning: "--context" on "dot verifiable" now refers to the 32-byte ring context. ` +
-        `For member-key derivation use "--entropy-key". Treating "--context ${opts.context}" ` +
-        `as the entropy key for now.\n`,
-    );
-  }
-  const entropyKeyStr = opts.entropyKey ?? opts.context;
+  const { person, productId } = resolvePersonSelector(opts);
 
   let mnemonic: string;
   let accountsFile: AccountsFile | undefined;
@@ -199,34 +207,27 @@ async function deriveMember(accountArg: string | undefined, opts: VerifiableOpts
     mnemonic = mnemonicFromStored(stored, account, accountsFile);
   }
 
-  const memberKeyHex = publicKeyToHex(deriveBandersnatchMember(mnemonic, entropyKeyStr));
+  const memberKeyHex = publicKeyToHex(
+    deriveMemberKey(derivePersonEntropy(mnemonic, person, productId)),
+  );
+  const path = `//${productId}//${PERSON_INDEX[person]}`;
 
   if (stored && accountsFile) {
     if (!stored.bandersnatch) stored.bandersnatch = {};
-    const entryKey = entropyKeyStr ?? "";
+    const entryKey = bandersnatchEntryKey(person, productId);
     if (stored.bandersnatch[entryKey] !== memberKeyHex) {
       stored.bandersnatch[entryKey] = memberKeyHex;
       await saveAccounts(accountsFile);
     }
   }
 
-  // Output label: keep `context` naming when the deprecated flag was used so
-  // existing scripts/output stay stable; use `entropyKey` for the new flag.
-  const fieldKey = usedDeprecatedContext ? "context" : "entropyKey";
-
   if (isJsonOutput(opts)) {
-    const result: Record<string, unknown> = { account, memberKey: memberKeyHex };
-    if (entropyKeyStr) result[fieldKey] = entropyKeyStr;
-    console.log(formatJson(result));
+    console.log(formatJson({ account, person, product: productId, path, memberKey: memberKeyHex }));
   } else {
     printHeading("Bandersnatch Member Key");
     console.log(`  ${BOLD}Account:${RESET}    ${account}`);
-    if (entropyKeyStr) {
-      const line = usedDeprecatedContext
-        ? `  ${BOLD}Context:${RESET}    ${entropyKeyStr}`
-        : `  ${BOLD}Entropy Key:${RESET} ${entropyKeyStr}`;
-      console.log(line);
-    }
+    console.log(`  ${BOLD}Person:${RESET}     ${person}`);
+    console.log(`  ${BOLD}Path:${RESET}       ${path}`);
     console.log(`  ${BOLD}Member Key:${RESET} ${memberKeyHex}`);
     console.log();
   }
@@ -235,7 +236,7 @@ async function deriveMember(accountArg: string | undefined, opts: VerifiableOpts
 async function deriveAliasCmd(accountArg: string | undefined, opts: VerifiableOpts) {
   const account = requireAccount(accountArg, "alias");
   const contextStr = requireOption(opts.context, "--context", "alias");
-  const entropy = await resolveEntropy(account, opts.entropyKey);
+  const entropy = await resolveEntropy(account, opts);
   const context = encodeContext(contextStr);
   const aliasHex = toHex(deriveAlias(entropy, context));
 
@@ -253,7 +254,7 @@ async function deriveAliasCmd(accountArg: string | undefined, opts: VerifiableOp
 async function signCmd(accountArg: string | undefined, opts: VerifiableOpts) {
   const account = requireAccount(accountArg, "sign");
   const message = await resolveMessage(opts);
-  const entropy = await resolveEntropy(account, opts.entropyKey);
+  const entropy = await resolveEntropy(account, opts);
   const signature = bandersnatchSign(entropy, message);
   const member = deriveMemberKey(entropy);
   const sigHex = toHex(signature);
@@ -283,7 +284,7 @@ async function proveCmd(accountArg: string | undefined, opts: VerifiableOpts) {
   const membersArg = requireOption(opts.members, "--members", "prove");
   const message = await resolveMessage(opts);
   const ringExponent = resolveRingExponent(opts);
-  const entropy = await resolveEntropy(account, opts.entropyKey);
+  const entropy = await resolveEntropy(account, opts);
   const context = encodeContext(contextStr);
   const members = await resolveBytesArg(membersArg, "--members", true);
 

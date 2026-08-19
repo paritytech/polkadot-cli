@@ -1985,62 +1985,83 @@ assumptions and does no fetching or selection of its own.
 
 #### Two concepts you must not conflate
 
+Member keys follow **RFC-0022**: a keyed-hash derivation tree with **hard
+junctions only**, rooted at the BIP39 entropy.
+
 ```
-Mnemonic ─BIP39─▶ entropy ─keyed blake2b─▶ member entropy ─▶ member key / secret
-                           (key = --entropy-key)                  │
-                                       ring proof: one_shot(…, --context, --message)
+Mnemonic ─BIP39─▶ entropy ─┬─ blake2b(key "ring-vrf")        tree root
+                           ├─ blake2b(key cc("//peopl.dot")) product node   (--product)
+                           └─ blake2b(key index_bytes(0|1))  member entropy (--person)
+                                                 │
+                                ring proof: one_shot(…, --context, --message)
 ```
 
-- **`--entropy-key <text|0xhex>`** — the key mixed into the keyed-blake2b that
-  turns your mnemonic into the Bandersnatch member entropy. **Omit** it for a
-  **lite** person (unkeyed); use **`candidate`** for a **full** person. It must
-  match the key used when the member was recognised on-chain, or you derive a
-  different (unrecognised) member key. It is **not** an sr25519 derivation path
-  and **not** the ring `--context`. (The value is the raw UTF-8 — or hex — bytes
-  of the blake2b key; this matches the iOS/Android clients, which key the
-  "full person" deriver with `"candidate"`.)
+- **`--person full|lite`** — which personhood key to derive. **`full`** (the
+  default) is `//peopl.dot//0`, the "PoP" key registered in ring
+  `pop:polkadot.network/people`; **`lite`** is `//peopl.dot//1`, ring
+  `pop:polkadot.network/people-lite`. These are two keys held at the same time,
+  not a rotation. It must match the one registered on-chain, or you derive a
+  different (unrecognised) member key.
 - **`--context <text|0xhex>`** — the **32-byte ring/proof namespace** (e.g.
   `"dotns"`), zero-padded right to 32 bytes like Solidity `bytes32()`. It
   determines the alias and is named `context` across the runtime
   (`type Context = [u8;32]`), the iOS client, and verifiablejs. Used by
-  `alias` / `prove` / `verify`.
+  `alias` / `prove` / `verify`. It plays **no part in key derivation**.
 
-> **Migration (breaking):** previously `dot verifiable <account> --context
-> candidate` used `--context` as the entropy-derivation key. That key is now
-> `--entropy-key`, and `--context` means the ring context. For one release the
-> old form still works on the member command (with a deprecation warning); use
-> `--entropy-key` going forward.
+The product id is **`peopl.dot` on every network** — a governance-reserved dotNS
+constant that the reference apps pin regardless of chain (Android's `ProductId`
+regex cannot even express a non-`.dot` TLD). The network axis for personhood
+lives in the **ring** (`chainId` + collection id), not in the key. `--product`
+overrides it as an escape hatch for clients that deliberately diverge; a
+different id derives a key no ring holds.
+
+> **Migration (breaking):** `--entropy-key` is removed. Member keys previously
+> came from a single keyed blake2b over the BIP39 entropy — `--entropy-key
+> candidate` for a full person, unkeyed for lite. Replace `--entropy-key
+> candidate` with `--person full`, and the unkeyed form with `--person lite`.
+> Passing `--entropy-key` now fails with an error rather than silently deriving
+> a different key. Note the default also changed: a bare `dot verifiable alice`
+> is now the **full** key, where it used to be lite.
+>
+> The reference apps cut over the same way, without migrating existing installs,
+> so an identity registered under the old scheme keeps its old key on-chain
+> until the runtime's `migrate_included_key` moves it. Those old keys are no
+> longer derivable with this CLI.
 
 #### Member keys
 
 ```bash
-# Lite person (unkeyed)
+# Full person (default) — //peopl.dot//0
 dot verifiable alice
 #   Account:    alice
-#   Member Key: 0xbb6ee099b568f1844d62fc00e6305c2e83aa8da30ce59e664ef39e089204d43c
+#   Person:     full
+#   Path:       //peopl.dot//0
+#   Member Key: 0x69ef2ed666eb7bfabcf93b4360c59439a03d6de3cccf77a411fcaa7017caf4a3
 
-# Full person (candidate-keyed)
-dot verifiable alice --entropy-key candidate
-#   Account:     alice
-#   Entropy Key: candidate
-#   Member Key:  0x5f915576987547d3e55bb4129ac8cae1d338f8933073dc74272b4c825f738592
+# Lite person — //peopl.dot//1
+dot verifiable alice --person lite
+#   Account:    alice
+#   Person:     lite
+#   Path:       //peopl.dot//1
+#   Member Key: 0x9dc979d9e8d3861c55fc7a0a15b439b5f22b619dd3b2e76a62a78156b79273ea
 ```
 
-Derived keys are saved to the account store and shown in `dot account inspect`.
+Both keys are derived automatically by `dot account create` (stored as `full`
+and `lite`) and shown in `dot account inspect`.
 
 #### Alias, sign, prove, verify
 
 ```bash
 # Alias for a ring context (deterministic in entropy + context)
-dot verifiable alias alice --entropy-key candidate --context dotns
+dot verifiable alias alice --context dotns
 
 # Standalone Bandersnatch signature (64 bytes)
-dot verifiable sign alice --message "hello" --entropy-key candidate
+dot verifiable sign alice --message "hello"
 dot verifiable verify-sig --signature 0x… --member 0x… --message "hello"
 
 # Ring-VRF proof over a members set, then verify it locally
 dot verifiable members 0x<key> 0x<key> --output json        # SCALE-encode the ring
-dot verifiable prove alice --entropy-key candidate --context dotns \
+dot verifiable prove alice --context dotns \
     --message 0x… --members 0x… --output json
 dot verifiable verify --proof 0x… --context dotns --message 0x… --members 0x…
 # verify exits non-zero if the proof does not validate
