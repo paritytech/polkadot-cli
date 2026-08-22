@@ -195,11 +195,18 @@ dot polkadot.tx.Balances.transfer_keep_alive 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZ
 #       "dest": { "type": "Id", "value": "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty" },
 #       "value": 1000000000
 #     }
+#   Extensions:
+#     CheckMortality            mortal (default)                   [builtin]
+#     CheckNonce                auto-fetched from chain (default)  [builtin]
+#     ChargeTransactionPayment  tip 0 (default)                    [builtin]
+#     ...                                                          (per-chain)
 #   Estimated fees: 158403157
 
 # Submit (omit --dry-run). Method names are snake_case as defined in the runtime.
 dot polkadot.tx.Balances.transfer_keep_alive bob 1000000000 --from alice
 ```
+
+The `Extensions:` block (shown on both dry-run and submit, human + `--json`) lists every transaction extension the chain applies, with the effective value — including defaults — for the ones you can steer (`--nonce`, `--tip`, `--mortality`, `--asset`, `--ext`). The set comes from chain metadata, so it differs per chain. Under `--json` it is an `extensions` array of `{ identifier, isBuiltin, source, value }`.
 
 **Global dry-run safety net.** Set the `DOT_DRY_RUN` env var (truthy: `1`/`true`/`yes`/`on`) to force EVERY tx to dry-run instead of submitting — handy when scripting or demoing so nothing accidentally lands on-chain. A hint is printed to stderr (stdout stays clean for `--json`):
 

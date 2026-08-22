@@ -5,14 +5,17 @@ import { join } from "node:path";
 import { isCompatible, mapLookupToTypedef } from "@polkadot-api/metadata-compatibility";
 import { Binary } from "polkadot-api";
 import { DEFAULT_CONFIG } from "../config/types.ts";
+import { PAPI_BUILTIN_EXTENSIONS } from "../core/metadata.ts";
 import { getTestMetadata } from "./__fixtures__/load-metadata.ts";
 import { runCli } from "./__fixtures__/run-cli.ts";
 import {
+  appliedExtensionJson,
   autoDefaultForType,
   buildCustomSignedExtensions,
   buildGeneralTx,
   decodeCallFallback,
   decodeCallToFileFormat,
+  describeAppliedExtensions,
   fileArgsToStrings,
   formatDispatchError,
   formatEventValue,
@@ -1485,6 +1488,98 @@ describe("buildCustomSignedExtensions", () => {
     expect(() => buildCustomSignedExtensions(meta, { CheckMetadataHsh: {} })).toThrow(
       /Unknown transaction extension "CheckMetadataHsh".*CheckMetadataHash/s,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// describeAppliedExtensions
+// ---------------------------------------------------------------------------
+
+describe("describeAppliedExtensions", () => {
+  const byId = (exts: ReturnType<typeof describeAppliedExtensions>, id: string) => {
+    const found = exts.find((e) => e.identifier === id);
+    if (!found) throw new Error(`extension ${id} not found in fixture`);
+    return found;
+  };
+
+  test("lists every signed extension the chain's metadata declares", () => {
+    const exts = describeAppliedExtensions(meta);
+    const ids = exts.map((e) => e.identifier);
+    // Fixture is polkadot metadata — these are always present.
+    expect(ids).toContain("CheckMortality");
+    expect(ids).toContain("CheckNonce");
+    expect(ids).toContain("ChargeTransactionPayment");
+    expect(exts.length).toBeGreaterThan(0);
+  });
+
+  test("marks builtins vs custom via PAPI_BUILTIN_EXTENSIONS", () => {
+    for (const e of describeAppliedExtensions(meta)) {
+      expect(e.isBuiltin).toBe(PAPI_BUILTIN_EXTENSIONS.has(e.identifier));
+    }
+  });
+
+  test("shows defaults when no options are passed", () => {
+    const exts = describeAppliedExtensions(meta);
+    const nonce = byId(exts, "CheckNonce");
+    expect(nonce.source).toBe("default");
+    expect(nonce.value).toContain("auto");
+
+    const tip = byId(exts, "ChargeTransactionPayment");
+    expect(tip.source).toBe("default");
+    expect(tip.value).toBe("tip 0");
+
+    const mortality = byId(exts, "CheckMortality");
+    expect(mortality.source).toBe("default");
+    expect(mortality.value).toBe("mortal");
+  });
+
+  test("reflects user-set nonce/tip as source=user", () => {
+    const exts = describeAppliedExtensions(meta, { nonce: 7, tip: 1_000_000n });
+    const nonce = byId(exts, "CheckNonce");
+    expect(nonce.source).toBe("user");
+    expect(nonce.value).toBe("7");
+
+    const tip = byId(exts, "ChargeTransactionPayment");
+    expect(tip.source).toBe("user");
+    expect(tip.value).toBe("tip 1000000");
+  });
+
+  test("reflects immortal and mortal-period mortality", () => {
+    const immortal = byId(
+      describeAppliedExtensions(meta, { mortality: { mortal: false } }),
+      "CheckMortality",
+    );
+    expect(immortal.source).toBe("user");
+    expect(immortal.value).toBe("immortal");
+
+    const mortal = byId(
+      describeAppliedExtensions(meta, { mortality: { mortal: true, period: 64 } }),
+      "CheckMortality",
+    );
+    expect(mortal.value).toBe("mortal (period 64)");
+  });
+
+  test("an --ext override wins over the default and reads as user-set", () => {
+    const exts = describeAppliedExtensions(meta, {
+      userExtOverrides: { CheckNonce: { value: 42 } },
+    });
+    const nonce = byId(exts, "CheckNonce");
+    expect(nonce.source).toBe("user");
+    expect(nonce.value).toBe("42");
+  });
+
+  test("appliedExtensionJson maps empty value to null", () => {
+    const exts = describeAppliedExtensions(meta);
+    const runtimeOne = exts.find((e) => e.value === "");
+    // polkadot fixture has void-typed builtins (e.g. CheckWeight) with no value
+    expect(runtimeOne).toBeDefined();
+    const json = appliedExtensionJson(runtimeOne!);
+    expect(json.value).toBeNull();
+    expect(json.source).toBe("runtime");
+
+    const nonceJson = appliedExtensionJson(byId(exts, "CheckNonce"));
+    expect(nonceJson.value).toBe("auto-fetched from chain");
+    expect(nonceJson.isBuiltin).toBe(true);
   });
 });
 

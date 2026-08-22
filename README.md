@@ -1250,7 +1250,9 @@ Build, sign, and submit transactions. Pass a `Pallet.Call` with arguments, or a 
 
 ```bash
 # Estimate fees without submitting (no broadcast). The Decode block shows
-# the call name on the header line and indented JSON below it.
+# the call name on the header line and indented JSON below it, and the
+# Extensions block lists every transaction extension applied to the tx —
+# with the effective value (including defaults) for the ones you can steer.
 dot polkadot.tx.System.remark 0xdeadbeef --from alice --dry-run
 # Output:
 #   Chain:  polkadot
@@ -1260,6 +1262,12 @@ dot polkadot.tx.System.remark 0xdeadbeef --from alice --dry-run
 #     {
 #       "remark": "0xdeadbeef"
 #     }
+#   Extensions:
+#     CheckMortality            mortal (default)                   [builtin]
+#     CheckNonce                auto-fetched from chain (default)  [builtin]
+#     ChargeTransactionPayment  tip 0 (default)                    [builtin]
+#     CheckMetadataHash         filled in by polkadot-api          [builtin]
+#     ...                                                          (per-chain)
 #   Estimated fees: 125598975
 
 # Transfer (amount in plancks). Method names are snake_case.
@@ -1540,7 +1548,28 @@ dot polkadot.tx.System.remark 0xdead --from alice --at 0x1234...abcd
 dot polkadot.tx.System.remark 0xdead --from alice --nonce 5 --tip 500000 --wait broadcast
 ```
 
-When set, nonce / tip / mortality / at are shown in both `--dry-run` and submission output. These flags are silently ignored with `--encode`, `--to-yaml`, and `--to-json` (which return before signing).
+`--at` is shown in both `--dry-run` and submission output when set; nonce / tip / mortality / asset now surface in the `Extensions:` block (see below), whether you set them or leave them at their defaults. These flags are silently ignored with `--encode`, `--to-yaml`, and `--to-json` (which return before signing).
+
+#### Applied transaction extensions
+
+Both `--dry-run` and submit print an `Extensions:` section listing every signed extension the chain applies to the transaction. The set is read from the chain's runtime metadata, so it reflects exactly what that chain declares — extensions and their defaults differ across chains (e.g. `ChargeAssetTxPayment`, `StorageWeightReclaim`, `PrevalidateAttests` appear only where the runtime declares them). For the extensions the CLI controls the effective value is shown, including the default when you didn't override it:
+
+```bash
+dot polkadot.tx.System.remark 0xdeadbeef --from alice --tip 1000000 --dry-run
+# Output (excerpt):
+#   Extensions:
+#     CheckMortality            mortal (default)                   [builtin]
+#     CheckNonce                auto-fetched from chain (default)  [builtin]
+#     ChargeTransactionPayment  tip 1000000                        [builtin]   ← your --tip
+#     CheckMetadataHash         filled in by polkadot-api          [builtin]
+#     AuthorizeCall             auto-default (override via --ext)   [custom]
+```
+
+- Values you set with `--nonce`, `--tip`, `--mortality`, `--asset`, or `--ext` show without the `(default)` marker.
+- `[builtin]` extensions with no user-facing value read as `filled in by polkadot-api`.
+- `[custom]` extensions are auto-defaulted and can be steered with `--ext`.
+
+Under `--json`, the same information is an `extensions` array of `{ identifier, isBuiltin, source, value }` (where `source` is `"user"`, `"default"`, or `"runtime"`), present on both the dry-run object and the final submit event.
 
 #### Pay fees in an alternative asset
 
