@@ -246,7 +246,7 @@ describe("getSignedExtensions", () => {
   test("preserves metadata order — never sorted", () => {
     // Signing payloads encode extensions in metadata order, so the accessor
     // must return them exactly as declared.
-    const raw = meta.unified.extrinsic.signedExtensions[0]!.map((e) => e.identifier);
+    const raw = meta.unified.extrinsic.extensionsByVersion[0]!.map((e) => e.identifier);
     expect(getSignedExtensions(meta).map((e) => e.identifier)).toEqual(raw);
     const sorted = [...raw].sort((a, b) => a.localeCompare(b));
     expect(raw).not.toEqual(sorted);
@@ -261,7 +261,9 @@ describe("getSignedExtensions", () => {
 function syntheticVersionedMeta(
   byVersion: Record<number, Array<{ identifier: string; type: number; additionalSigned: number }>>,
 ): MetadataBundle {
-  return { unified: { extrinsic: { signedExtensions: byVersion } } } as unknown as MetadataBundle;
+  return {
+    unified: { extrinsic: { extensionsByVersion: byVersion } },
+  } as unknown as MetadataBundle;
 }
 
 describe("getTransactionExtensionVersion", () => {

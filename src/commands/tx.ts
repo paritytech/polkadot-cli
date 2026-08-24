@@ -1,8 +1,9 @@
 import { compact as scaleCompact } from "@polkadot-api/substrate-bindings";
 import type { Decoded } from "@polkadot-api/view-builder";
 import { getViewBuilder } from "@polkadot-api/view-builder";
-import type { TxBestBlocksState, TxBroadcasted, TxEvent, TxFinalized } from "polkadot-api";
+import type { TxBroadcasted, TxEvent, TxFinalized, TxInBestBlock } from "polkadot-api";
 import { Binary } from "polkadot-api";
+import type { SignerTxCreator, TxCreator } from "polkadot-api/tx-creator";
 import { stringify as stringifyYaml } from "yaml";
 import { loadConfig, resolveChain } from "../config/store.ts";
 import { primaryRpc } from "../config/types.ts";
@@ -333,35 +334,42 @@ export async function handleTx(
     const mortality = parseMortalityOption(opts.mortality);
     const at = parseAtOption(opts.at);
 
+    const builtinExtOverrides: Record<string, { value?: any; additionalSigned?: any }> = {};
+
     if (!decodeOnly || opts.unsigned) {
       const userExtOverrides = parseExtOption(opts.ext);
 
-      // When --asset is specified, handle ChargeAssetTxPayment as a custom extension
-      // instead of letting PAPI handle it. PAPI's built-in path runs
-      // `isAssetCompat(asset)` (packages/client/src/tx/tx.ts) against a typedef
-      // derived from metadata; for XCM Location JSON on the unsafe API this
-      // check rejects with "Incompatible runtime asset" even with fresh metadata.
-      // Bypassing it lets us SCALE-encode the asset directly via the metadata
-      // builder.
-      if (asset !== undefined) {
-        userExtOverrides.ChargeAssetTxPayment ??= {
-          value: { tip: tip ?? 0n, asset_id: asset },
-        };
-      }
-
       const customSignedExtensions = buildCustomSignedExtensions(meta, userExtOverrides);
+
+      // PAPI's builtin extension handling runs before `customSignedExtensions`
+      // and the first entry per identifier wins, so overrides of builtin
+      // extensions must be pre-seeded into the payload (withExtensionOverrides)
+      // rather than passed as customSignedExtensions, where they'd be silently
+      // ignored.
+      for (const id of Object.keys(customSignedExtensions)) {
+        if (PAPI_BUILTIN_EXTENSIONS.has(id)) {
+          builtinExtOverrides[id] = customSignedExtensions[id]!;
+          delete customSignedExtensions[id];
+        }
+      }
 
       const built: Record<string, any> = {};
       if (Object.keys(customSignedExtensions).length > 0)
         built.customSignedExtensions = customSignedExtensions;
       if (nonce !== undefined) built.nonce = nonce;
       if (tip !== undefined) built.tip = tip;
+      // PAPI SCALE-encodes the asset directly via the metadata builder, so XCM
+      // Location JSON works on the unsafe API. An explicit --ext override of
+      // ChargeAssetTxPayment still takes priority (pre-seeded above).
+      if (asset !== undefined) built.asset = asset;
       if (mortality !== undefined) built.mortality = mortality;
       if (at !== undefined) built.at = at;
 
       txOptions = Object.keys(built).length > 0 ? built : undefined;
       unsafeApi = clientHandle?.client.getUnsafeApi();
     }
+
+    const txSigner = signer && withExtensionOverrides(signer, meta, builtinExtOverrides);
 
     let tx: any;
     let callHex: string;
@@ -463,9 +471,7 @@ export async function handleTx(
       try {
         estimatedFees = String(
           await withStalenessSuggestion(chainName, clientHandle!, () =>
-            withBlockAvailabilityHint(opts.at, () =>
-              tx.getEstimatedFees(signer?.publicKey, txOptions),
-            ),
+            withBlockAvailabilityHint(opts.at, () => tx.getEstimatedFees(txSigner, txOptions)),
           ),
         );
       } catch (err) {
@@ -603,9 +609,7 @@ export async function handleTx(
       let dispatchErrorMsg: string | undefined;
       if (result.ok) {
         const hint =
-          result.type === "txBestBlocksState"
-            ? ` ${DIM}(best block, not yet finalized)${RESET}`
-            : "";
+          result.type === "inBestBlock" ? ` ${DIM}(best block, not yet finalized)${RESET}` : "";
         console.log(`  ${BOLD}Status:${RESET} ${GREEN}ok${RESET}${hint}`);
       } else {
         dispatchErrorMsg = formatDispatchError(result.dispatchError);
@@ -648,7 +652,7 @@ export async function handleTx(
     if (isJsonOutput(opts)) {
       const result = await withStalenessSuggestion(chainName, clientHandle!, () =>
         withBlockAvailabilityHint(opts.at, () =>
-          watchTransactionJson(tx.signSubmitAndWatch(signer, txOptions), waitLevel),
+          watchTransactionJson(tx.createSubmitAndWatch(txSigner, txOptions), waitLevel),
         ),
       );
       const rpcUrl = primaryRpc(opts.rpc ?? chainConfig.rpc);
@@ -687,7 +691,7 @@ export async function handleTx(
 
     const result = await withStalenessSuggestion(chainName, clientHandle!, () =>
       withBlockAvailabilityHint(opts.at, () =>
-        watchTransaction(tx.signSubmitAndWatch(signer, txOptions), waitLevel),
+        watchTransaction(tx.createSubmitAndWatch(txSigner, txOptions), waitLevel),
       ),
     );
 
@@ -715,7 +719,7 @@ export async function handleTx(
     let dispatchErrorMsg: string | undefined;
     if (result.ok) {
       const hint =
-        result.type === "txBestBlocksState" ? ` ${DIM}(best block, not yet finalized)${RESET}` : "";
+        result.type === "inBestBlock" ? ` ${DIM}(best block, not yet finalized)${RESET}` : "";
       console.log(`  ${BOLD}Status:${RESET} ${GREEN}ok${RESET}${hint}`);
     } else {
       dispatchErrorMsg = formatDispatchError(result.dispatchError);
@@ -1555,6 +1559,45 @@ function parseExtOption(ext: string | undefined): Record<string, any> {
 /** Sentinel value: type could not be auto-defaulted */
 const NO_DEFAULT = Symbol("no-default");
 
+/**
+ * Wrap a tx creator so user-supplied overrides of PAPI-builtin extensions win:
+ * the entries are pre-seeded into the payload, and every builtin enhancer
+ * skips an extension whose identifier is already present.
+ */
+function withExtensionOverrides(
+  creator: SignerTxCreator,
+  meta: MetadataBundle,
+  overrides: Record<string, { value?: any; additionalSigned?: any }>,
+): SignerTxCreator {
+  if (Object.keys(overrides).length === 0) return creator;
+
+  const preSeeded = getSignedExtensions(meta)
+    .filter((ext) => ext.identifier in overrides)
+    .map((ext) => {
+      const params = overrides[ext.identifier]!;
+      return {
+        id: ext.identifier,
+        extra: Binary.toHex(meta.builder.buildDefinition(ext.type).enc(params.value)),
+        additionalSigned: Binary.toHex(
+          meta.builder.buildDefinition(ext.additionalSigned).enc(params.additionalSigned),
+        ),
+      };
+    });
+
+  const wrapped: TxCreator = (payload, txOpts, bindings, mockedSignature) =>
+    creator(
+      { ...payload, extensions: [...payload.extensions, ...preSeeded] },
+      txOpts,
+      bindings,
+      mockedSignature,
+    );
+
+  return Object.assign(wrapped, {
+    publicKey: creator.publicKey,
+    signBytes: creator.signBytes,
+  });
+}
+
 function buildCustomSignedExtensions(
   meta: MetadataBundle,
   userOverrides: Record<string, any>,
@@ -1769,7 +1812,7 @@ function buildGeneralTx(
 
 // --- Progressive transaction tracking ---
 
-type WatchResult = TxFinalized | (TxBestBlocksState & { found: true }) | TxBroadcasted;
+type WatchResult = TxFinalized | TxInBestBlock | TxBroadcasted;
 
 function watchTransaction(
   observable: import("rxjs").Observable<TxEvent>,
@@ -1784,7 +1827,7 @@ function watchTransaction(
       next(event: TxEvent) {
         if (settled) return;
         switch (event.type) {
-          case "signed":
+          case "created":
             if (!options?.unsigned) {
               spinner.succeed("Signed");
               console.log(`  ${BOLD}Tx:${RESET}     ${event.txHash}`);
@@ -1802,20 +1845,19 @@ function watchTransaction(
               spinner.start("In best block...");
             }
             break;
-          case "txBestBlocksState":
-            if (event.found) {
-              if (level === "best-block") {
-                spinner.succeed(`In best block #${event.block.number}`);
-                settled = true;
-                subscription.unsubscribe();
-                resolve(event);
-              } else {
-                spinner.succeed(`In best block #${event.block.number}`);
-                spinner.start("Finalizing...");
-              }
+          case "inBestBlock":
+            if (level === "best-block") {
+              spinner.succeed(`In best block #${event.block.number}`);
+              settled = true;
+              subscription.unsubscribe();
+              resolve(event);
             } else {
-              spinner.start("In best block...");
+              spinner.succeed(`In best block #${event.block.number}`);
+              spinner.start("Finalizing...");
             }
+            break;
+          case "notInBestBlock":
+            spinner.start("In best block...");
             break;
           case "finalized":
             spinner.succeed(`Finalized in block #${event.block.number}`);
@@ -1844,7 +1886,7 @@ function watchTransactionJson(
       next(event: TxEvent) {
         if (settled) return;
         switch (event.type) {
-          case "signed":
+          case "created":
             if (!options?.unsigned) {
               printJsonLine({ event: "signed", txHash: event.txHash });
             }
@@ -1857,14 +1899,12 @@ function watchTransactionJson(
               resolve(event);
             }
             break;
-          case "txBestBlocksState":
-            if (event.found) {
-              printJsonLine({ event: "bestBlock", blockNumber: event.block.number, found: true });
-              if (level === "best-block") {
-                settled = true;
-                subscription.unsubscribe();
-                resolve(event);
-              }
+          case "inBestBlock":
+            printJsonLine({ event: "bestBlock", blockNumber: event.block.number, found: true });
+            if (level === "best-block") {
+              settled = true;
+              subscription.unsubscribe();
+              resolve(event);
             }
             break;
           case "finalized":
