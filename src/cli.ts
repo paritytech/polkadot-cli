@@ -107,7 +107,11 @@ if (process.argv[2] === "__complete") {
       "--at <block>",
       'Block hash, "best", or "finalized" to read/validate against (tx, query, apis)',
     )
-    .option("--unsigned", "Submit as unsigned/bare transaction (no signer required, for tx)")
+    .option(
+      "--general",
+      "Submit as a general (v5) transaction — authorized via extensions, no signer (for tx)",
+    )
+    .option("--unsigned", "(deprecated) Alias for --general")
     .option("--refresh", "Refresh the cached RPC method list from the node (for rpc)")
     .action(
       async (
@@ -130,6 +134,7 @@ if (process.argv[2] === "__complete") {
           tip?: string;
           mortality?: string;
           at?: string;
+          general?: boolean;
           unsigned?: boolean;
           dump?: boolean;
           refresh?: boolean;
@@ -171,7 +176,7 @@ if (process.argv[2] === "__complete") {
               await handleTx(target, args, {
                 ...handlerOpts,
                 from: opts.from,
-                unsigned: opts.unsigned ?? cmd.unsigned,
+                general: resolveGeneralFlag(opts) ?? cmd.general,
                 dryRun: fileDryRun,
                 encode: opts.encode,
                 toYaml: opts.toYaml,
@@ -289,7 +294,7 @@ if (process.argv[2] === "__complete") {
             const txOpts = {
               ...handlerOpts,
               from: opts.from,
-              unsigned: opts.unsigned,
+              general: resolveGeneralFlag(opts),
               dryRun,
               encode: opts.encode,
               toYaml: opts.toYaml,
@@ -356,6 +361,19 @@ if (process.argv[2] === "__complete") {
   cli.option("--help, -h", "Display this message");
   cli.version(version);
 
+  /** Merge --general with the deprecated --unsigned alias, warning when the alias is used */
+  function resolveGeneralFlag(opts: {
+    general?: boolean;
+    unsigned?: boolean;
+  }): boolean | undefined {
+    if (opts.unsigned) {
+      console.error(
+        "Warning: --unsigned is deprecated and will be removed; use --general instead (it submits a v5 general transaction, which is not unsigned — authorization lives in the transaction extensions).",
+      );
+    }
+    return opts.general ?? opts.unsigned;
+  }
+
   /** Collect all --var KEY=VALUE flags from argv (CAC only keeps the last for repeated options) */
   function collectVarFlags(argv: string[]): Record<string, string> {
     const vars: string[] = [];
@@ -394,7 +412,7 @@ if (process.argv[2] === "__complete") {
       "  dot polkadot.query.System                           List storage items in System",
     );
     console.log("  dot tx.System.remark 0xdead --from alice --chain polkadot");
-    console.log("  dot tx.People.create_people_collection --unsigned --chain polkadot-people");
+    console.log("  dot tx.People.create_people_collection --general --chain polkadot-people");
     console.log("  dot polkadot.const.Balances.ExistentialDeposit");
     console.log("  dot polkadot.events.Balances                        List events in Balances");
     console.log("  dot polkadot.apis.Core.version                      Call a runtime API");

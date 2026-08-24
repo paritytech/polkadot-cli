@@ -29,7 +29,7 @@ A command-line tool for interacting with Polkadot-ecosystem chains. Manage chain
 - ✅ Batteries included — all system parachains and testnets already setup to be used
 - ✅ File-based commands — run any command from a YAML/JSON file with variable substitution
 - ✅ Sovereign accounts — store a parachain (child / sibling) or pallet (Treasury, Bounties, NominationPools, …) sovereign as a named watch-only account in one command
-- ✅ Unsigned/authorized transactions — submit governance-authorized calls without a signer (`--unsigned`)
+- ✅ General (v5) transactions — submit governance-authorized calls without a signer (`--general`)
 - ✅ Non-native fee payment — pay tx fees in any asset the chain accepts via `--asset` (asset-hub-style chains)
 - ✅ Message signing — sign arbitrary bytes with account keypairs for use as `MultiSignature` arguments
 - ✅ Bandersnatch member keys — derive Ring VRF member keys from mnemonics for on-chain member sets
@@ -1976,30 +1976,30 @@ The `--asset` echo is included in dry-run and submission output (and `--json`). 
 
 - The target chain must expose `ChargeAssetTxPayment` in its signed extensions — asset-hub-style chains do; plain relay chains don't, and `--asset` is silently ignored on those.
 - The estimated fee shown is **native-denominated**. The on-chain asset-conversion pool determines the actual asset amount charged at execution time.
-- `--asset` is unnecessary (and not compatible) with `--unsigned`: unsigned transactions default `ChargeAssetTxPayment` to zero tip / no asset.
+- `--asset` is unnecessary (and not compatible) with `--general`: general transactions default `ChargeAssetTxPayment` to zero tip / no asset.
 - Combine freely with `--tip`, `--nonce`, `--mortality`, and `--at`. `--tip` is encoded inside the asset-payment extension alongside the asset id.
 
 Under the hood, the CLI routes the asset through its custom signed-extension pipeline rather than polkadot-api's native `asset` option — this works around a papi compatibility check that rejects XCM Location JSON on the unsafe API path.
 
-### Unsigned/authorized transactions
+### General (v5) transactions
 
-Submit transactions without a signer using `--unsigned`. This is for calls authorized by on-chain mechanisms (e.g. the `AuthorizeCall` signed extension) rather than cryptographic signatures. Typically used for governance-authorized calls on chains like the People chain.
+Submit transactions without a signer using `--general`. This builds an extrinsic v5 *general* transaction: it carries no signature field of its own — authorization (a signature, or something else entirely) lives in the transaction extensions. Typically used for calls authorized by on-chain mechanisms (e.g. the `AuthorizeCall` transaction extension), such as governance-authorized calls on chains like the People chain.
 
 ```
 # Submit an authorized call on the People chain
-dot polkadot-people.tx.People.create_people_collection --unsigned
+dot polkadot-people.tx.People.create_people_collection --general
 
 # Dry-run to inspect before submitting
-dot polkadot-people.tx.People.create_people_collection --unsigned --dry-run
+dot polkadot-people.tx.People.create_people_collection --general --dry-run
 
 # Encode the full general transaction bytes
-dot polkadot-people.tx.People.create_people_collection --unsigned --encode
+dot polkadot-people.tx.People.create_people_collection --general --encode
 
 # With raw hex call data
-dot polkadot-people.tx 0x3306 --unsigned
+dot polkadot-people.tx 0x3306 --general
 
 # JSON output for scripting
-dot polkadot-people.tx.People.create_people_collection --unsigned --json
+dot polkadot-people.tx.People.create_people_collection --general --json
 ```
 
 The CLI constructs a v5 general transaction (`0x45` format) with all signed extension "extra" values auto-defaulted:
@@ -2015,20 +2015,22 @@ The CLI constructs a v5 general transaction (`0x45` format) with all signed exte
 Override individual extensions with `--ext` if needed:
 
 ```
-dot polkadot-people.tx.People.create_people_collection --unsigned \
+dot polkadot-people.tx.People.create_people_collection --general \
   --ext '{"RestrictOrigins":{"value":true}}'
 ```
 
-`--unsigned` is mutually exclusive with `--from`, `--nonce`, `--tip`, and `--mortality`.
+`--general` is mutually exclusive with `--from`, `--nonce`, `--tip`, and `--mortality`.
 
-#### File-based unsigned transactions
+The old `--unsigned` flag (and the `unsigned: true` file key) still works as a deprecated alias — a v5 general transaction is not "unsigned", so the flag was renamed.
 
-YAML/JSON command files support an `unsigned: true` field. The CLI `--unsigned` flag overrides the file value:
+#### File-based general transactions
+
+YAML/JSON command files support a `general: true` field. The CLI `--general` flag overrides the file value:
 
 ```yaml
 # create-people-collection.yaml
 chain: polkadot-people
-unsigned: true
+general: true
 tx:
   People:
     create_people_collection: null
@@ -2461,7 +2463,7 @@ dot polkadot-people.tx.PeopleLite.attest <candidate> Sr25519(0x...) <ring_vrf_ke
 
 ## Sovereign Accounts (Parachain & Pallet)
 
-`dot account add` accepts derivation flags that compute a deterministic sovereign address and store it as a named watch-only account — reusable in `--from` (for `--unsigned` flows), as a tx argument, and in `dot account list`. Runs offline — no chain connection required.
+`dot account add` accepts derivation flags that compute a deterministic sovereign address and store it as a named watch-only account — reusable in `--from` (for `--general` flows), as a tx argument, and in `dot account list`. Runs offline — no chain connection required.
 
 <video autoplay loop muted playsinline aria-label="Deriving a pallet sovereign and both parachain sovereigns, then querying one by name">
   <source src="vhs/sovereign.webm" type="video/webm">
