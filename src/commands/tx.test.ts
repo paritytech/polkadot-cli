@@ -17,6 +17,7 @@ import {
   formatDispatchError,
   formatEventValue,
   formatRawDecoded,
+  generalDefaultForType,
   handleTx,
   NO_DEFAULT,
   normalizeValue,
@@ -35,7 +36,6 @@ import {
   resolveExtrinsicVersion,
   sanitizeForSerialization,
   typeHint,
-  unsignedDefaultForType,
 } from "./tx.ts";
 
 const meta = getTestMetadata();
@@ -1855,10 +1855,16 @@ describe("dot tx CLI integration", () => {
     expect(stderr).toContain("already encoded");
   });
 
-  test("--v5 --unsigned rejects", async () => {
+  test("--v5 --general rejects", async () => {
+    const { stderr, exitCode } = await runCli(["tx.System.remark", "0xaa", "--v5", "--general"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("--v4/--v5 and --general are mutually exclusive");
+  });
+
+  test("--v5 with deprecated --unsigned alias rejects the same way", async () => {
     const { stderr, exitCode } = await runCli(["tx.System.remark", "0xaa", "--v5", "--unsigned"]);
     expect(exitCode).toBe(1);
-    expect(stderr).toContain("--v4/--v5 and --unsigned are mutually exclusive");
+    expect(stderr).toContain("--v4/--v5 and --general are mutually exclusive");
   });
 
   test("--v4 --v5 rejects", async () => {
@@ -2323,11 +2329,67 @@ describe("dot tx CLI integration", () => {
 });
 
 // ---------------------------------------------------------------------------
-// --unsigned flag validation
+// --general flag validation
 // ---------------------------------------------------------------------------
 
-describe("--unsigned flag validation", () => {
-  test("--unsigned and --from are mutually exclusive", async () => {
+describe("--general flag validation", () => {
+  test("--general and --from are mutually exclusive", async () => {
+    const { stderr, exitCode } = await runCli([
+      "tx.System.remark",
+      "0xaa",
+      "--general",
+      "--from",
+      "alice",
+    ]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("mutually exclusive");
+  });
+
+  test("--general does not support --nonce", async () => {
+    const { stderr, exitCode } = await runCli([
+      "tx.System.remark",
+      "0xaa",
+      "--general",
+      "--nonce",
+      "5",
+    ]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("--general does not support --nonce");
+  });
+
+  test("--general does not support --tip", async () => {
+    const { stderr, exitCode } = await runCli([
+      "tx.System.remark",
+      "0xaa",
+      "--general",
+      "--tip",
+      "1000",
+    ]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("--general does not support --tip");
+  });
+
+  test("--general does not support --mortality", async () => {
+    const { stderr, exitCode } = await runCli([
+      "tx.System.remark",
+      "0xaa",
+      "--general",
+      "--mortality",
+      "immortal",
+    ]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("--general does not support --mortality");
+  });
+
+  test("--general alone (without --from) passes gate check for raw hex", async () => {
+    // Raw hex + --general should not error about missing --from
+    // It will error during submission (no chain connection in test) but should
+    // get past the gate check
+    const { stderr } = await runCli(["tx.0x0001", "--general"]);
+    expect(stderr).not.toContain("--from is required");
+  });
+
+  test("--unsigned is a deprecated alias for --general", async () => {
     const { stderr, exitCode } = await runCli([
       "tx.System.remark",
       "0xaa",
@@ -2336,71 +2398,28 @@ describe("--unsigned flag validation", () => {
       "alice",
     ]);
     expect(exitCode).toBe(1);
+    expect(stderr).toContain("--unsigned is deprecated");
     expect(stderr).toContain("mutually exclusive");
-  });
-
-  test("--unsigned does not support --nonce", async () => {
-    const { stderr, exitCode } = await runCli([
-      "tx.System.remark",
-      "0xaa",
-      "--unsigned",
-      "--nonce",
-      "5",
-    ]);
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("--unsigned does not support --nonce");
-  });
-
-  test("--unsigned does not support --tip", async () => {
-    const { stderr, exitCode } = await runCli([
-      "tx.System.remark",
-      "0xaa",
-      "--unsigned",
-      "--tip",
-      "1000",
-    ]);
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("--unsigned does not support --tip");
-  });
-
-  test("--unsigned does not support --mortality", async () => {
-    const { stderr, exitCode } = await runCli([
-      "tx.System.remark",
-      "0xaa",
-      "--unsigned",
-      "--mortality",
-      "immortal",
-    ]);
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("--unsigned does not support --mortality");
-  });
-
-  test("--unsigned alone (without --from) passes gate check for raw hex", async () => {
-    // Raw hex + --unsigned should not error about missing --from
-    // It will error during submission (no chain connection in test) but should
-    // get past the gate check
-    const { stderr } = await runCli(["tx.0x0001", "--unsigned"]);
-    expect(stderr).not.toContain("--from is required");
   });
 });
 
 // ---------------------------------------------------------------------------
-// unsignedDefaultForType
+// generalDefaultForType
 // ---------------------------------------------------------------------------
 
-describe("unsignedDefaultForType", () => {
+describe("generalDefaultForType", () => {
   test("void returns empty Uint8Array", () => {
-    const result = unsignedDefaultForType("SomeExt", { type: "void" });
+    const result = generalDefaultForType("SomeExt", { type: "void" });
     expect(result).toEqual(new Uint8Array([]));
   });
 
   test("option returns undefined (None)", () => {
-    const result = unsignedDefaultForType("AsPerson", { type: "option", value: {} });
+    const result = generalDefaultForType("AsPerson", { type: "option", value: {} });
     expect(result).toBeUndefined();
   });
 
   test("enum with Disabled returns Disabled variant", () => {
-    const result = unsignedDefaultForType("VerifyMultiSignature", {
+    const result = generalDefaultForType("VerifyMultiSignature", {
       type: "enum",
       value: { Signed: {}, Disabled: { type: "void" } },
     });
@@ -2408,7 +2427,7 @@ describe("unsignedDefaultForType", () => {
   });
 
   test("enum with Immortal returns Immortal variant", () => {
-    const result = unsignedDefaultForType("SomeEra", {
+    const result = generalDefaultForType("SomeEra", {
       type: "enum",
       value: { Immortal: { type: "void" }, Mortal1: {} },
     });
@@ -2416,27 +2435,27 @@ describe("unsignedDefaultForType", () => {
   });
 
   test("CheckMortality returns Immortal regardless of entry", () => {
-    const result = unsignedDefaultForType("CheckMortality", { type: "enum", value: {} });
+    const result = generalDefaultForType("CheckMortality", { type: "enum", value: {} });
     expect(result).toEqual({ type: "Immortal" });
   });
 
   test("CheckNonce returns 0", () => {
-    const result = unsignedDefaultForType("CheckNonce", { type: "compact" });
+    const result = generalDefaultForType("CheckNonce", { type: "compact" });
     expect(result).toBe(0);
   });
 
   test("ChargeTransactionPayment returns 0n", () => {
-    const result = unsignedDefaultForType("ChargeTransactionPayment", { type: "compact" });
+    const result = generalDefaultForType("ChargeTransactionPayment", { type: "compact" });
     expect(result).toBe(0n);
   });
 
   test("ChargeAssetTxPayment returns zero tip and no asset", () => {
-    const result = unsignedDefaultForType("ChargeAssetTxPayment", { type: "struct" });
+    const result = generalDefaultForType("ChargeAssetTxPayment", { type: "struct" });
     expect(result).toEqual({ tip: 0n, asset_id: undefined });
   });
 
   test("primitive bool returns false", () => {
-    const result = unsignedDefaultForType("RestrictOrigins", {
+    const result = generalDefaultForType("RestrictOrigins", {
       type: "primitive",
       value: "bool",
     });
@@ -2444,22 +2463,22 @@ describe("unsignedDefaultForType", () => {
   });
 
   test("primitive u32 returns 0", () => {
-    const result = unsignedDefaultForType("SomeExt", { type: "primitive", value: "u32" });
+    const result = generalDefaultForType("SomeExt", { type: "primitive", value: "u32" });
     expect(result).toBe(0);
   });
 
   test("primitive u128 returns 0n", () => {
-    const result = unsignedDefaultForType("SomeExt", { type: "primitive", value: "u128" });
+    const result = generalDefaultForType("SomeExt", { type: "primitive", value: "u128" });
     expect(result).toBe(0n);
   });
 
   test("compact returns 0", () => {
-    const result = unsignedDefaultForType("SomeExt", { type: "compact" });
+    const result = generalDefaultForType("SomeExt", { type: "compact" });
     expect(result).toBe(0);
   });
 
   test("unknown type returns NO_DEFAULT", () => {
-    const result = unsignedDefaultForType("SomeExt", { type: "struct", value: {} });
+    const result = generalDefaultForType("SomeExt", { type: "struct", value: {} });
     expect(result).toBe(NO_DEFAULT);
   });
 });
@@ -2491,11 +2510,11 @@ describe("buildGeneralTx", () => {
 });
 
 // ---------------------------------------------------------------------------
-// --unsigned help text and gate logic
+// --general help text and gate logic
 // ---------------------------------------------------------------------------
 
-describe("--unsigned help and gate", () => {
-  test("missing --from and --unsigned shows call help with --unsigned hint", async () => {
+describe("--general help and gate", () => {
+  test("missing --from and --general shows call help", async () => {
     const { stdout, exitCode } = await runCli(["tx.System.remark", "0xaa"]);
     expect(exitCode).toBe(0);
     // Should show help, not error about missing flags
@@ -2505,11 +2524,34 @@ describe("--unsigned help and gate", () => {
 });
 
 // ---------------------------------------------------------------------------
-// --unsigned file-based input
+// --general file-based input
 // ---------------------------------------------------------------------------
 
-describe("--unsigned with file-based input", () => {
-  test("YAML file with unsigned: true and --dry-run works", async () => {
+describe("--general with file-based input", () => {
+  test("YAML file with general: true and --dry-run works", async () => {
+    const yaml = [
+      "chain: polkadot",
+      "general: true",
+      "tx:",
+      "  System:",
+      '    remark: "0xdeadbeef"',
+    ].join("\n");
+    const { stdout, exitCode, stderr } = await runCli(
+      ["{{HOME}}/general-remark.yaml", "--dry-run"],
+      { files: { "general-remark.yaml": yaml } },
+    );
+    // This will fail to connect (no live chain in tests), but the flag parsing
+    // should work. Check that it doesn't error about missing --from
+    if (exitCode === 0) {
+      expect(stdout).toContain("general");
+      expect(stdout).toContain("N/A");
+    } else {
+      // Connection error is fine, but --from error is not
+      expect(stderr).not.toContain("--from is required");
+    }
+  });
+
+  test("legacy unsigned: true still works and warns", async () => {
     const yaml = [
       "chain: polkadot",
       "unsigned: true",
@@ -2517,17 +2559,12 @@ describe("--unsigned with file-based input", () => {
       "  System:",
       '    remark: "0xdeadbeef"',
     ].join("\n");
-    const { stdout, exitCode, stderr } = await runCli(
-      ["{{HOME}}/unsigned-remark.yaml", "--dry-run"],
-      { files: { "unsigned-remark.yaml": yaml } },
-    );
-    // This will fail to connect (no live chain in tests), but the flag parsing
-    // should work. Check that it doesn't error about missing --from
-    if (exitCode === 0) {
-      expect(stdout).toContain("unsigned");
-      expect(stdout).toContain("N/A");
-    } else {
-      // Connection error is fine, but --from error is not
+    const { exitCode, stderr } = await runCli(["{{HOME}}/unsigned-remark.yaml", "--dry-run"], {
+      files: { "unsigned-remark.yaml": yaml },
+    });
+    expect(stderr).toContain('"unsigned: true"');
+    expect(stderr).toContain("deprecated");
+    if (exitCode !== 0) {
       expect(stderr).not.toContain("--from is required");
     }
   });
@@ -2540,30 +2577,30 @@ describe("--unsigned with file-based input", () => {
 // @ts-expect-error Bun supports describe(label, options, fn) at runtime
 describe("DOT_DRY_RUN global flag", { timeout: 15_000 }, () => {
   test("DOT_DRY_RUN=1 dry-runs an otherwise-submitting tx and prints the hint", async () => {
-    // An unsigned tx without --dry-run would attempt to broadcast (and, offline,
+    // A general tx without --dry-run would attempt to broadcast (and, offline,
     // fail to connect). With DOT_DRY_RUN set it must dry-run instead: print the
-    // unsigned dry-run output to stdout and never connect.
+    // general dry-run output to stdout and never connect.
     const { stdout, stderr, exitCode } = await runCli(
-      ["tx.System.remark", "0xdeadbeef", "--unsigned"],
+      ["tx.System.remark", "0xdeadbeef", "--general"],
       { env: { DOT_DRY_RUN: "1" } },
     );
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("unsigned (v5 general)");
-    expect(stdout).toContain("N/A (unsigned transaction)");
+    expect(stdout).toContain("general (v5)");
+    expect(stdout).toContain("N/A (general transaction)");
     // Hint goes to stderr so it never corrupts stdout.
     expect(stderr).toContain("DOT_DRY_RUN is set");
   });
 
   test("hint is written to stderr, never stdout (clean --json)", async () => {
     const { stdout, stderr, exitCode } = await runCli(
-      ["tx.System.remark", "0xdeadbeef", "--unsigned", "--json"],
+      ["tx.System.remark", "0xdeadbeef", "--general", "--json"],
       { env: { DOT_DRY_RUN: "1" } },
     );
     expect(exitCode).toBe(0);
     // stdout must be valid JSON with no banner text mixed in.
     expect(stdout).not.toContain("DOT_DRY_RUN");
     const parsed = JSON.parse(stdout);
-    expect(parsed.unsigned).toBe(true);
+    expect(parsed.general).toBe(true);
     expect(parsed.estimatedFees).toBeNull();
     expect(stderr).toContain("DOT_DRY_RUN is set");
   });

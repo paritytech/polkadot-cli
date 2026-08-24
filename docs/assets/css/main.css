@@ -234,6 +234,14 @@ main {
    #polkadot-cli > section {
       padding-left: 25%;
    }
+
+   /* The hero recording precedes the first h2, so main.js leaves it a direct
+      child of the page section rather than wrapping it in one of the h2 sections
+      that carry the offset above. Without the same padding it runs underneath the
+      sticky contents column. */
+   .tape-hero {
+      padding-left: 25%;
+   }
 }
 
 #polkadot-cli > h1 {
@@ -485,11 +493,26 @@ pre code strong {
    font-weight: 600;
 }
 
+/* Terminal recordings (see tapes/) — framed like a code block, since that is
+   what they are: real `dot` output, captured. Recorded on a black background
+   so the video sits flush inside its own frame. */
+video {
+   display: block;
+   width: 100%;
+   box-sizing: border-box;
+   margin: 7rem auto;
+   background: rgb(0,0,0);
+   border-radius: 7px;
+   border: 1px solid rgb(0,0,0);
+}
+
 @media (min-width: 744px) {
    #polkadot-cli section p,
    #polkadot-cli section ol,
    #polkadot-cli section ul,
    #polkadot-cli section pre,
+   #polkadot-cli section video,
+   .tape-hero video,
    #polkadot-cli section iframe {
       margin-left: auto;
       margin-right: auto;
@@ -504,6 +527,8 @@ pre code strong {
    #polkadot-cli section ol,
    #polkadot-cli section ul,
    #polkadot-cli section pre,
+   #polkadot-cli section video,
+   .tape-hero video,
    #polkadot-cli section iframe {
       max-width: 58rem;
       left: 0;

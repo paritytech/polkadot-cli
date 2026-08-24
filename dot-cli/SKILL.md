@@ -450,6 +450,8 @@ dot account add treasury 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY
 # Keyed account from a BIP39 mnemonic (use --secret, or --env to keep it off disk)
 dot account add signer --secret "word1 word2 ... word12"
 dot account add ci --env SECRET_VAR
+# The variable may hold a mnemonic or a 0x hex seed, and is read at signing time —
+# not at add time. See "Committing a workspace (and CI)" under Local Workspaces.
 
 # --secret also accepts a 0x 32-byte hex seed or a 0x 64-byte raw sr25519 private
 # key (the value `--show-secret` prints). Raw private keys reject --path.
@@ -634,7 +636,33 @@ Gotchas:
 
 - An "Unknown account/chain" error names the config root it searched (`in workspace /path/.polkadot`) — if unexpected, you're in the wrong directory; check `dot which`.
 - `dot init` errors on re-init and refuses to run in `$HOME`; it warns when a parent workspace gets shadowed or when a set `DOT_HOME` masks discovery.
-- The workspace starts empty (built-in chains still work — they ship with the binary). Nothing is copied from the global config, and no `.gitignore` is written — `accounts.json` holds plain-text secrets, so decide deliberately whether to ignore it.
+- The workspace starts empty (built-in chains still work — they ship with the binary). Nothing is copied from the global config, and no `.gitignore` is written.
+
+### Committing a workspace (and CI)
+
+Track `.polkadot/config.json` (the chains) and ignore the caches. `chains/` is ~450 KB of binary metadata per chain that every runtime upgrade rewrites; `dot chain update <chain>` refetches it.
+
+```gitignore
+.env
+.polkadot/chains/
+.polkadot/update-check.json
+```
+
+`accounts.json` is committable ONLY while every entry is env-backed (`--env`) or watch-only — those store a variable name or a public key, never key material:
+
+```bash
+dot account add ci-signer --env DOT_CI_SIGNER
+# stored: {"name":"ci-signer","secret":{"env":"DOT_CI_SIGNER"},"publicKey":"0x3a3d45…"}
+# Works with the variable UNSET too — records publicKey "" and prints:
+#   Address will resolve when $DOT_CI_SIGNER is set.
+
+# Guard the invariant — fails if any account carries an inline secret:
+jq -e '[.accounts[].secret | select(type == "string")] | length == 0' .polkadot/accounts.json
+```
+
+The invariant is about current contents, not the format: a later `dot account create` or `dot account add --secret` in that directory writes a mnemonic into the same tracked file.
+
+**`dot` does NOT read `.env`** — it reads environment variables only. Load the file yourself (`set -a; source .env; set +a`, direnv, `dotenvx run --`), or in CI supply the variable from the runner's secret store (`env: DOT_CI_SIGNER: ${{ secrets.DOT_CI_SIGNER }}`) and skip `.env` altogether.
 
 ## Other Commands
 

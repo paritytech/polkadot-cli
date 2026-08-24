@@ -516,48 +516,57 @@ tx:
     await expect(loadCommandFile(path, {})).rejects.toThrow("exactly one item");
   });
 
-  // --- unsigned field ---
+  // --- general field ---
 
-  test("parses unsigned: true from JSON", async () => {
+  test("parses general: true from JSON", async () => {
     const path = await writeTemp(
-      "unsigned.json",
+      "general.json",
       JSON.stringify({
         chain: "people",
-        unsigned: true,
+        general: true,
         tx: { People: { create_people_collection: null } },
       }),
     );
     const result = await loadCommandFile(path, {});
-    expect(result.unsigned).toBe(true);
+    expect(result.general).toBe(true);
     expect(result.chain).toBe("people");
     expect(result.pallet).toBe("People");
     expect(result.item).toBe("create_people_collection");
   });
 
-  test("parses unsigned: true from YAML", async () => {
+  test("parses general: true from YAML", async () => {
     const path = await writeTemp(
-      "unsigned.yaml",
-      "chain: people\nunsigned: true\ntx:\n  People:\n    create_people_collection: null\n",
+      "general.yaml",
+      "chain: people\ngeneral: true\ntx:\n  People:\n    create_people_collection: null\n",
     );
     const result = await loadCommandFile(path, {});
-    expect(result.unsigned).toBe(true);
+    expect(result.general).toBe(true);
   });
 
-  test("unsigned defaults to undefined when not set", async () => {
+  test("general defaults to undefined when not set", async () => {
     const path = await writeTemp(
-      "no-unsigned.json",
+      "no-general.json",
       JSON.stringify({ tx: { System: { remark: null } } }),
     );
     const result = await loadCommandFile(path, {});
-    expect(result.unsigned).toBeUndefined();
+    expect(result.general).toBeUndefined();
   });
 
-  test("unsigned: false is treated as undefined", async () => {
+  test("general: false is treated as undefined", async () => {
     const path = await writeTemp(
-      "unsigned-false.json",
-      JSON.stringify({ unsigned: false, tx: { System: { remark: null } } }),
+      "general-false.json",
+      JSON.stringify({ general: false, tx: { System: { remark: null } } }),
     );
     const result = await loadCommandFile(path, {});
-    expect(result.unsigned).toBeUndefined();
+    expect(result.general).toBeUndefined();
+  });
+
+  test("legacy unsigned: true maps to general", async () => {
+    const path = await writeTemp(
+      "unsigned-legacy.json",
+      JSON.stringify({ unsigned: true, tx: { System: { remark: null } } }),
+    );
+    const result = await loadCommandFile(path, {});
+    expect(result.general).toBe(true);
   });
 });

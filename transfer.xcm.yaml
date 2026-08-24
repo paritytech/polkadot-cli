@@ -1,4 +1,4 @@
-chain: people-paseo
+chain: paseo-people
 tx:
   PolkadotXcm:
     send:

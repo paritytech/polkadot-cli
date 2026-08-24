@@ -19,6 +19,7 @@
     "lint:fix": "biome check --write .",
     "test": "bun test --concurrent",
     "test:coverage": "bun test --concurrent --coverage --coverage-reporter=lcov --coverage-dir=coverage",
+    "tapes": "bun scripts/tapes.ts",
     "prepare": "husky",
     "changeset": "changeset",
     "version": "changeset version"
