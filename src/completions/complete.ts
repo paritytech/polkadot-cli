@@ -68,7 +68,7 @@ const ACCOUNT_SUBCOMMANDS = [
 const GLOBAL_OPTIONS = ["--chain", "--rpc", "--output", "--help", "--version"];
 const TX_OPTIONS = [
   "--from",
-  "--unsigned",
+  "--general",
   "--dry-run",
   "--encode",
   "--ext",

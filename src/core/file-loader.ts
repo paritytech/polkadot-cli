@@ -11,7 +11,7 @@ export interface ParsedFileCommand {
   pallet: string;
   item: string;
   args: unknown; // object | array | scalar | undefined
-  unsigned?: boolean;
+  general?: boolean;
 }
 
 /** File extensions recognized as command files */
@@ -178,7 +178,12 @@ export async function loadCommandFile(
 
   // Extract metadata
   const chain = doc.chain != null ? String(doc.chain) : undefined;
-  const unsigned = doc.unsigned === true ? true : undefined;
+  if (doc.unsigned === true) {
+    console.error(
+      `Warning: "unsigned: true" in "${filePath}" is deprecated; use "general: true" instead.`,
+    );
+  }
+  const general = doc.general === true || doc.unsigned === true ? true : undefined;
 
   // Find the category key
   const foundCategories = CATEGORIES.filter((c) => c in doc);
@@ -238,6 +243,6 @@ export async function loadCommandFile(
     pallet,
     item,
     args: args ?? undefined,
-    unsigned,
+    general,
   };
 }

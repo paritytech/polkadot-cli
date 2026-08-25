@@ -154,7 +154,7 @@ export async function handleTx(
     chain?: string;
     rpc?: string;
     from?: string;
-    unsigned?: boolean;
+    general?: boolean;
     dryRun?: boolean;
     encode?: boolean;
     toYaml?: boolean;
@@ -247,10 +247,10 @@ export async function handleTx(
     return;
   }
 
-  if (!opts.from && !opts.unsigned && !opts.encode && !opts.toYaml && !opts.toJson) {
+  if (!opts.from && !opts.general && !opts.encode && !opts.toYaml && !opts.toJson) {
     if (isRawCall) {
       throw new Error(
-        "--from is required (or use --unsigned for bare tx, --encode for hex without signing)",
+        "--from is required (or use --general for a general (v5) tx, --encode for hex without signing)",
       );
     }
     await showItemHelp("tx", target, opts);
@@ -275,17 +275,17 @@ export async function handleTx(
     throw new Error("--to-yaml and --to-json are mutually exclusive");
   }
 
-  if (opts.unsigned && opts.from) {
-    throw new Error("--unsigned and --from are mutually exclusive");
+  if (opts.general && opts.from) {
+    throw new Error("--general and --from are mutually exclusive");
   }
-  if (opts.unsigned && opts.nonce) {
-    throw new Error("--unsigned does not support --nonce");
+  if (opts.general && opts.nonce) {
+    throw new Error("--general does not support --nonce");
   }
-  if (opts.unsigned && opts.tip) {
-    throw new Error("--unsigned does not support --tip");
+  if (opts.general && opts.tip) {
+    throw new Error("--general does not support --tip");
   }
-  if (opts.unsigned && opts.mortality) {
-    throw new Error("--unsigned does not support --mortality");
+  if (opts.general && opts.mortality) {
+    throw new Error("--general does not support --mortality");
   }
 
   const config = await loadConfig();
@@ -303,11 +303,11 @@ export async function handleTx(
   const { name: chainName, chain: chainConfig } = resolveChain(config, effectiveChain);
 
   const decodeOnly = opts.encode || opts.toYaml || opts.toJson;
-  const signer = decodeOnly || opts.unsigned ? undefined : await resolveAccountSigner(opts.from!);
+  const signer = decodeOnly || opts.general ? undefined : await resolveAccountSigner(opts.from!);
 
   let clientHandle: ClientHandle | undefined;
 
-  if (!decodeOnly || opts.unsigned) {
+  if (!decodeOnly || opts.general) {
     clientHandle = await createChainClient(chainName, chainConfig, opts.rpc);
   }
 
@@ -336,7 +336,7 @@ export async function handleTx(
 
     const builtinExtOverrides: Record<string, { value?: any; additionalSigned?: any }> = {};
 
-    if (!decodeOnly || opts.unsigned) {
+    if (!decodeOnly || opts.general) {
       const userExtOverrides = parseExtOption(opts.ext);
 
       const customSignedExtensions = buildCustomSignedExtensions(meta, userExtOverrides);
@@ -413,7 +413,7 @@ export async function handleTx(
         opts.parsedArgs !== undefined ? fileArgsToStrings(opts.parsedArgs) : args;
       const callData = await parseCallArgs(meta, palletInfo.name, callInfo.name, effectiveArgs);
 
-      if ((opts.encode && !opts.unsigned) || opts.toYaml || opts.toJson) {
+      if ((opts.encode && !opts.general) || opts.toYaml || opts.toJson) {
         const { codec, location } = meta.builder.buildCall(palletInfo.name, callInfo.name);
         const encodedArgs = codec.enc(callData);
         const fullCall = new Uint8Array([location[0], location[1], ...encodedArgs]);
@@ -441,13 +441,13 @@ export async function handleTx(
     const decodedStr = decodeCall(meta, callHex);
     const decodedObj = decodeCallObject(meta, callHex);
 
-    // --- Unsigned dry-run ---
-    if (opts.dryRun && opts.unsigned) {
+    // --- General (v5) dry-run ---
+    if (opts.dryRun && opts.general) {
       if (isJsonOutput(opts)) {
         console.log(
           formatJson({
             chain: chainName,
-            unsigned: true,
+            general: true,
             callHex,
             decoded: decodedStr,
             estimatedFees: null,
@@ -456,10 +456,10 @@ export async function handleTx(
         return;
       }
       console.log(`  ${BOLD}Chain:${RESET}  ${chainName}`);
-      console.log(`  ${BOLD}Type:${RESET}   unsigned (v5 general)`);
+      console.log(`  ${BOLD}Type:${RESET}   general (v5)`);
       console.log(`  ${BOLD}Call:${RESET}   ${callHex}`);
       printDecodedCall(decodedObj, decodedStr);
-      console.log(`  ${BOLD}Fees:${RESET}   ${DIM}N/A (unsigned transaction)${RESET}`);
+      console.log(`  ${BOLD}Fees:${RESET}   ${DIM}N/A (general transaction)${RESET}`);
       return;
     }
 
@@ -525,8 +525,8 @@ export async function handleTx(
 
     const waitLevel = parseWaitLevel(opts.wait);
 
-    // --- Unsigned submission ---
-    if (opts.unsigned) {
+    // --- General (v5) submission ---
+    if (opts.general) {
       const callDataBytes = await tx.getEncodedData();
       const userExtOverrides = parseExtOption(opts.ext);
       const generalTx = buildGeneralTx(meta, callDataBytes, userExtOverrides);
@@ -549,7 +549,7 @@ export async function handleTx(
       if (isJsonOutput(opts)) {
         const result = await withStalenessSuggestion(chainName, clientHandle!, () =>
           withBlockAvailabilityHint(opts.at, () =>
-            watchTransactionJson(observable, waitLevel, { unsigned: true }),
+            watchTransactionJson(observable, waitLevel, { general: true }),
           ),
         );
         const rpcUrl = primaryRpc(opts.rpc ?? chainConfig.rpc);
@@ -565,7 +565,7 @@ export async function handleTx(
         }
         printJsonLine({
           event: result.type === "finalized" ? "finalized" : "bestBlock",
-          unsigned: true,
+          general: true,
           blockNumber: result.block.number,
           blockHash,
           txHash: result.txHash,
@@ -588,13 +588,13 @@ export async function handleTx(
 
       const result = await withStalenessSuggestion(chainName, clientHandle!, () =>
         withBlockAvailabilityHint(opts.at, () =>
-          watchTransaction(observable, waitLevel, { unsigned: true }),
+          watchTransaction(observable, waitLevel, { general: true }),
         ),
       );
 
       console.log();
       console.log(`  ${BOLD}Chain:${RESET}  ${chainName}`);
-      console.log(`  ${BOLD}Type:${RESET}   unsigned (v5 general)`);
+      console.log(`  ${BOLD}Type:${RESET}   general (v5)`);
       console.log(`  ${BOLD}Call:${RESET}   ${callHex}`);
       printDecodedCall(decodedObj, decodedStr);
       console.log(`  ${BOLD}Tx:${RESET}     ${result.txHash}`);
@@ -1663,15 +1663,15 @@ function autoDefaultForType(entry: any): any {
   return NO_DEFAULT;
 }
 
-// --- General (unsigned) transaction construction ---
+// --- General (v5) transaction construction ---
 
 /**
  * Determine the default "extra" (transaction body) value for an extension
- * in an unsigned general transaction. More aggressive than autoDefaultForType:
+ * in a general (v5) transaction. More aggressive than autoDefaultForType:
  * also handles primitives, compacts, enums with Immortal, and structs.
  */
-function unsignedDefaultForType(identifier: string, entry: any): any {
-  // Handle well-known builtin extensions with specific unsigned defaults
+function generalDefaultForType(identifier: string, entry: any): any {
+  // Handle well-known builtin extensions with specific general-tx defaults
   switch (identifier) {
     case "CheckMortality":
       return { type: "Immortal" };
@@ -1687,7 +1687,7 @@ function unsignedDefaultForType(identifier: string, entry: any): any {
   const auto = autoDefaultForType(entry);
   if (auto !== NO_DEFAULT) return auto;
 
-  // Additional defaults for unsigned transactions
+  // Additional defaults for general transactions
   if (entry.type === "primitive") {
     switch (entry.value) {
       case "bool":
@@ -1727,7 +1727,7 @@ function unsignedDefaultForType(identifier: string, entry: any): any {
 
 /**
  * Build a v5 general transaction (0x45) with all extension "extra" values
- * defaulted for unsigned/authorized submission.
+ * defaulted for signerless/authorized submission.
  *
  * Byte layout:
  *   compact(payload_len) | 0x45 | ext_version | ext_extras... | call_data
@@ -1762,10 +1762,10 @@ function buildGeneralTx(
       const override = userExtOverrides[ext.identifier];
       value = override.value !== undefined ? override.value : override;
     } else {
-      value = unsignedDefaultForType(ext.identifier, valueEntry);
+      value = generalDefaultForType(ext.identifier, valueEntry);
       if (value === NO_DEFAULT) {
         throw new CliError(
-          `Cannot determine default unsigned value for extension "${ext.identifier}" ` +
+          `Cannot determine default value for extension "${ext.identifier}" ` +
             `(type: ${valueEntry.type}). Provide it via --ext '{"${ext.identifier}":{"value":...}}'`,
         );
       }
@@ -1817,18 +1817,18 @@ type WatchResult = TxFinalized | TxInBestBlock | TxBroadcasted;
 function watchTransaction(
   observable: import("rxjs").Observable<TxEvent>,
   level: WaitLevel,
-  options?: { unsigned?: boolean },
+  options?: { general?: boolean },
 ): Promise<WatchResult> {
   const spinner = new Spinner();
   return new Promise<WatchResult>((resolve, reject) => {
     let settled = false;
-    spinner.start(options?.unsigned ? "Submitting..." : "Signing...");
+    spinner.start(options?.general ? "Submitting..." : "Signing...");
     const subscription = observable.subscribe({
       next(event: TxEvent) {
         if (settled) return;
         switch (event.type) {
           case "created":
-            if (!options?.unsigned) {
+            if (!options?.general) {
               spinner.succeed("Signed");
               console.log(`  ${BOLD}Tx:${RESET}     ${event.txHash}`);
               spinner.start("Broadcasting...");
@@ -1878,7 +1878,7 @@ function watchTransaction(
 function watchTransactionJson(
   observable: import("rxjs").Observable<TxEvent>,
   level: WaitLevel,
-  options?: { unsigned?: boolean },
+  options?: { general?: boolean },
 ): Promise<WatchResult> {
   return new Promise<WatchResult>((resolve, reject) => {
     let settled = false;
@@ -1887,7 +1887,7 @@ function watchTransactionJson(
         if (settled) return;
         switch (event.type) {
           case "created":
-            if (!options?.unsigned) {
+            if (!options?.general) {
               printJsonLine({ event: "signed", txHash: event.txHash });
             }
             break;
@@ -1930,6 +1930,7 @@ export {
   formatDispatchError,
   formatEventValue,
   formatRawDecoded,
+  generalDefaultForType,
   NO_DEFAULT,
   normalizeValue,
   parseCallArgs,
@@ -1940,5 +1941,4 @@ export {
   parseTypedArg,
   sanitizeForSerialization,
   typeHint,
-  unsignedDefaultForType,
 };
