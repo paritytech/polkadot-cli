@@ -10,14 +10,14 @@ import {
   validateMnemonic,
 } from "@polkadot-labs/hdkd-helpers";
 import { getPublicKey, HDKD, secretFromSeed, sign } from "@scure/sr25519";
-import type { PolkadotSigner } from "polkadot-api/signer";
-import { getPolkadotSigner } from "polkadot-api/signer";
+import type { SignerTxCreator } from "polkadot-api/tx-creator";
+import { getTxCreator } from "polkadot-api/tx-creator";
 import { findAccount, loadAccounts } from "../config/accounts-store.ts";
 import type { AccountsFile } from "../config/accounts-types.ts";
 import { type EnvSecret, isEnvSecret } from "../config/accounts-types.ts";
 import { describeConfigDir } from "../config/store.ts";
 import { findClosest } from "../utils/fuzzy-match.ts";
-import { createV5GeneralSigner } from "./extrinsic-v5.ts";
+import { createV5GeneralTxCreator } from "./extrinsic-v5.ts";
 
 export const DEV_NAMES = ["alice", "bob", "charlie", "dave", "eve", "ferdie"] as const;
 
@@ -332,19 +332,19 @@ export async function resolveAccountKeypair(
   return keypairFromSecret(resolveSecret(account.secret), account.derivationPath);
 }
 
-export async function resolveAccountSigner(name: string): Promise<PolkadotSigner> {
+export async function resolveAccountSigner(name: string): Promise<SignerTxCreator> {
   const keypair = await resolveAccountKeypair(name);
-  return getPolkadotSigner(keypair.publicKey, "Sr25519", keypair.sign);
+  return getTxCreator(keypair.publicKey, "Sr25519", keypair.sign);
 }
 
-/** Wrap a keypair in the signer matching the chosen extrinsic version. */
+/** Wrap a keypair in the tx creator matching the chosen extrinsic version. */
 export function signerFromKeypair(
   keypair: { publicKey: Uint8Array; sign: (msg: Uint8Array) => Uint8Array },
   extrinsicVersion: 4 | 5,
-): PolkadotSigner {
+): SignerTxCreator {
   return extrinsicVersion === 5
-    ? createV5GeneralSigner(keypair.publicKey, keypair.sign)
-    : getPolkadotSigner(keypair.publicKey, "Sr25519", keypair.sign);
+    ? createV5GeneralTxCreator(keypair.publicKey, keypair.sign)
+    : getTxCreator(keypair.publicKey, "Sr25519", keypair.sign);
 }
 
 export async function resolveAccountExpandedSecret(name: string): Promise<Uint8Array> {

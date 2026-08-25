@@ -1,8 +1,9 @@
 import { blake2b } from "@noble/hashes/blake2.js";
-import { bytesToHex } from "@noble/hashes/utils.js";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
+import type { CommonSignerTxCreator } from "@polkadot-api/signers-common";
+import { getSignBytes, withCommonExtensions, withNonce } from "@polkadot-api/signers-common";
 import { AccountId, compact as scaleCompact } from "@polkadot-api/substrate-bindings";
-import type { PolkadotSigner } from "polkadot-api/signer";
-import { getPolkadotSigner } from "polkadot-api/signer";
+import type { TxCreator } from "polkadot-api/tx-creator";
 import type { MetadataBundle } from "./metadata.ts";
 import { getSignedExtensions, getTransactionExtensionVersion, parseMetadata } from "./metadata.ts";
 
@@ -16,8 +17,8 @@ import { getSignedExtensions, getTransactionExtensionVersion, parseMetadata } fr
  * with `UnknownOrigin`), so v5 signing is strictly capability-gated: most live
  * runtimes, including Polkadot and all asset hubs, must keep signing v4.
  *
- * The byte assembly here is pure and papi-free. Only createV5GeneralSigner
- * adapts it to polkadot-api's `PolkadotSigner.signTx` seam, which hands us the
+ * The byte assembly here is pure and papi-free. Only the TxCreator at the
+ * bottom adapts it to polkadot-api's tx-creator seam, which hands us the
  * already-encoded extension values and broadcasts whatever bytes we return
  * untouched — papi itself has no v5 transaction builder (papi issue #760).
  */
@@ -185,42 +186,60 @@ function encodeSignedAuthValue(
   });
 }
 
+/** Mock used when papi asks for a fee-estimation signature (mocked=true). */
+const SR25519_MOCK_SIGNATURE = new Uint8Array(64);
+
+const hexBytes = (hex: string): Uint8Array => hexToBytes(hex.startsWith("0x") ? hex.slice(2) : hex);
+
 /**
- * A PolkadotSigner whose signTx produces a signed v5 General extrinsic,
- * carrying the signature inside the VerifyMultiSignature extension value.
- *
- * papi hands signTx the encoded extra/implicit bytes of every extension it
- * knows (including our customSignedExtensions), so mortality, nonce and tip
- * behave exactly as on the v4 path — only the assembly differs.
+ * The bare v5 General TxCreator: turns papi's TxPayloadV1 into wire bytes.
+ * Every transaction extension of the chosen version must be present in
+ * `payload.extensions` (first entry per identifier wins, like papi's own v4
+ * creator), except the VerifyMultiSignature slot, whose value is produced
+ * here. Exported unwrapped for byte-exact tests — real callers want
+ * createV5GeneralTxCreator, which adds papi's extension-filling enhancers.
  */
-export function createV5GeneralSigner(
+export function v5GeneralCreator(
   publicKey: Uint8Array,
   sign: (msg: Uint8Array) => Uint8Array | Promise<Uint8Array>,
-): PolkadotSigner {
-  // Reuse papi's raw-bytes signer for signBytes (<Bytes> wrapping semantics).
-  const rawSigner = getPolkadotSigner(publicKey, "Sr25519", sign);
-
-  const signTx: PolkadotSigner["signTx"] = async (callData, signedExtensions, metadataRaw) => {
+): TxCreator {
+  return async (payload, _opts, _bindings, mockedSignature) => {
     // Decode the metadata papi is operating on (it may be newer than our
     // cache after a runtime upgrade mid-session).
-    const meta = parseMetadata(metadataRaw);
+    const meta = parseMetadata(hexBytes(payload.context.metadata));
     const cap = checkV5SignedCapability(meta);
     if (!cap.ok) {
       throw new Error(`Cannot sign a v5 General transaction: ${cap.reason}.`);
     }
+    if (payload.txExtVersion != null && payload.txExtVersion !== cap.extensionVersion) {
+      throw new Error(
+        `Only txExtVersion ${cap.extensionVersion} is supported for v5 General on this chain`,
+      );
+    }
 
+    const callData = hexBytes(payload.callData);
     const list = getSignedExtensions(meta, cap.extensionVersion);
     const values: ExtensionByteValues[] = list.map(({ identifier }) => {
-      const provided = signedExtensions[identifier];
-      // papi 2.x builds values from extension-version key 0; if our chosen
-      // version has extensions papi didn't cover, fail loudly.
+      if (identifier === cap.authIdentifier) {
+        // The signature slot: it contributes nothing to the implication (it
+        // sits at the cut) and its wire value is injected below — any
+        // caller-provided value is deliberately ignored.
+        return { identifier, extra: new Uint8Array(), additionalSigned: new Uint8Array() };
+      }
+      const provided = payload.extensions.find(({ id }) => id === identifier);
       if (!provided) throw new Error(`Missing ${identifier} signed extension`);
-      return { identifier, extra: provided.value, additionalSigned: provided.additionalSigned };
+      return {
+        identifier,
+        extra: hexBytes(provided.extra),
+        additionalSigned: hexBytes(provided.additionalSigned),
+      };
     });
 
     const cutIndex = values.findLastIndex((v) => v.identifier === cap.authIdentifier);
     const implication = computeV5Implication(cap.extensionVersion, callData, values, cutIndex);
-    const signature = await sign(v5SignerPayload(implication));
+    const signature = mockedSignature
+      ? SR25519_MOCK_SIGNATURE
+      : await sign(v5SignerPayload(implication));
 
     // Two-pass: the payload above was computed with VerifyMultiSignature
     // disabled at the cut (it contributes nothing there); now inject the
@@ -230,8 +249,25 @@ export function createV5GeneralSigner(
         ? encodeSignedAuthValue(meta, list[cutIndex]!.type, signature, publicKey)
         : v.extra,
     );
-    return assembleV5General(cap.extensionVersion, extras, callData);
+    return `0x${bytesToHex(assembleV5General(cap.extensionVersion, extras, callData))}`;
   };
+}
 
-  return { publicKey, signTx, signBytes: rawSigner.signBytes };
+/**
+ * A SignerTxCreator producing signed v5 General extrinsics, carrying the
+ * signature inside the VerifyMultiSignature extension value.
+ *
+ * Wrapped in papi's own enhancer chain (nonce, mortality, tip, genesis, ...),
+ * so extension filling behaves exactly like the stock v4 creator — only the
+ * final byte assembly differs. Honoring `mockedSignature` makes papi's
+ * `getEstimatedFees`/`getPaymentInfo` work unchanged on the v5 path.
+ */
+export function createV5GeneralTxCreator(
+  publicKey: Uint8Array,
+  sign: (msg: Uint8Array) => Uint8Array | Promise<Uint8Array>,
+): CommonSignerTxCreator {
+  return Object.assign(
+    withNonce(publicKey)(withCommonExtensions(v5GeneralCreator(publicKey, sign))),
+    { publicKey, signBytes: getSignBytes(sign) },
+  ) as CommonSignerTxCreator;
 }

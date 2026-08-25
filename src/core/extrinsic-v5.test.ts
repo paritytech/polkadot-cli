@@ -11,9 +11,10 @@ import {
   assembleV5General,
   checkV5SignedCapability,
   computeV5Implication,
-  createV5GeneralSigner,
+  createV5GeneralTxCreator,
   type ExtensionByteValues,
   V5_GENERAL_PREAMBLE,
+  v5GeneralCreator,
   v5SignerPayload,
 } from "./extrinsic-v5.ts";
 import { getSignedExtensions } from "./metadata.ts";
@@ -113,29 +114,53 @@ describe("checkV5SignedCapability", () => {
   });
 });
 
-describe("createV5GeneralSigner", () => {
+describe("v5GeneralCreator", () => {
   const publicKey = Uint8Array.from({ length: 32 }, (_, i) => i + 1);
   const fakeSignature = Uint8Array.from({ length: 64 }, (_, i) => 0xf0 - i);
+  // The bare creator (and the wrapped one, when every extension is provided)
+  // must never touch the bindings — fail loudly if it does.
+  const bindings = new Proxy(
+    {},
+    {
+      get(_, prop) {
+        throw new Error(`unexpected bindings access: ${String(prop)}`);
+      },
+    },
+  ) as any;
+
+  function makePayload(
+    metadataRaw: Uint8Array,
+    extensions: Array<{ id: string; extra: string; additionalSigned: string }>,
+    callData: Uint8Array,
+  ) {
+    return {
+      version: 1 as const,
+      signer: null,
+      callData: hex(callData),
+      extensions,
+      txExtVersion: null,
+      context: {
+        metadata: hex(metadataRaw),
+        token: null,
+        bestBlockHeight: 0,
+        bestBlockHash: "0x00",
+        genesisHash: "0x00",
+      },
+    };
+  }
 
   /** Synthetic per-extension encoded values, distinguishable per index. */
   function syntheticExtensions(meta = getPeopleMetadata()) {
-    const record: Record<
-      string,
-      { identifier: string; value: Uint8Array; additionalSigned: Uint8Array }
-    > = {};
-    for (const [i, e] of getSignedExtensions(meta).entries()) {
-      record[e.identifier] = {
-        identifier: e.identifier,
-        value: Uint8Array.from([0x10 + i]),
-        additionalSigned: Uint8Array.from([0x80 + i]),
-      };
-    }
-    return record;
+    return getSignedExtensions(meta).map((e, i) => ({
+      id: e.identifier,
+      extra: hex(Uint8Array.from([0x10 + i])),
+      additionalSigned: hex(Uint8Array.from([0x80 + i])),
+    }));
   }
 
   test("signs blake2_256 of the implication and injects the signature at the cut", async () => {
     let signedMessage: Uint8Array | undefined;
-    const signer = createV5GeneralSigner(publicKey, (msg) => {
+    const creator = v5GeneralCreator(publicKey, (msg) => {
       signedMessage = msg;
       return fakeSignature;
     });
@@ -145,16 +170,21 @@ describe("createV5GeneralSigner", () => {
     const callData = Uint8Array.from([0x00, 0x07, 0x04, 0xab]);
     const provided = syntheticExtensions(meta);
 
-    const wire = await signer.signTx(callData, provided, getPeopleMetadataRaw(), 0);
+    const wire = await creator(
+      makePayload(getPeopleMetadataRaw(), provided, callData),
+      {},
+      bindings,
+      false,
+    );
 
     // The signed message is the hash of the implication computed from the
     // provided bytes, cut at VerifyMultiSignature (index 1 on preview-people).
     const cutIndex = extensions.findIndex((e) => e.identifier === "VerifyMultiSignature");
     expect(cutIndex).toBe(1);
-    const values = extensions.map((e) => ({
+    const values = extensions.map((e, i) => ({
       identifier: e.identifier,
-      extra: provided[e.identifier]!.value,
-      additionalSigned: provided[e.identifier]!.additionalSigned,
+      extra: Uint8Array.from([0x10 + i]),
+      additionalSigned: Uint8Array.from([0x80 + i]),
     }));
     const expectedPayload = v5SignerPayload(computeV5Implication(0, callData, values, cutIndex));
     expect(signedMessage).toEqual(expectedPayload);
@@ -165,22 +195,106 @@ describe("createV5GeneralSigner", () => {
     const expectedSignedValue = Uint8Array.from([0x01, 0x01, ...fakeSignature, ...publicKey]);
     const extras = values.map((v, i) => (i === cutIndex ? expectedSignedValue : v.extra));
     const expected = assembleV5General(0, extras, callData);
-    expect(hex(wire)).toBe(hex(expected));
+    expect(wire).toBe(hex(expected));
+  });
+
+  test("mockedSignature substitutes 64 zero bytes without calling sign (fee estimation)", async () => {
+    const creator = v5GeneralCreator(publicKey, () => {
+      throw new Error("sign must not be called for a mocked signature");
+    });
+    const callData = Uint8Array.from([0x00, 0x07, 0x04, 0xab]);
+
+    const wire = await creator(
+      makePayload(getPeopleMetadataRaw(), syntheticExtensions(), callData),
+      {},
+      bindings,
+      true,
+    );
+
+    const expectedSignedValue = Uint8Array.from([0x01, 0x01, ...new Uint8Array(64), ...publicKey]);
+    expect(wire).toContain(bytesToHex(expectedSignedValue));
   });
 
   test("rejects on a chain that cannot carry a v5 signature", async () => {
-    const signer = createV5GeneralSigner(publicKey, () => fakeSignature);
+    const creator = v5GeneralCreator(publicKey, () => fakeSignature);
     await expect(
-      signer.signTx(Uint8Array.from([0x00, 0x00]), {}, getTestMetadataRaw(), 0),
+      creator(
+        makePayload(getTestMetadataRaw(), [], Uint8Array.from([0x00, 0x00])),
+        {},
+        bindings,
+        false,
+      ),
     ).rejects.toThrow("Cannot sign a v5 General transaction");
   });
 
-  test("fails loudly when papi did not provide an extension we must encode", async () => {
-    const signer = createV5GeneralSigner(publicKey, () => fakeSignature);
-    const provided = syntheticExtensions();
-    delete provided.CheckNonce;
+  test("fails loudly when an extension we must encode was not provided", async () => {
+    const creator = v5GeneralCreator(publicKey, () => fakeSignature);
+    const provided = syntheticExtensions().filter((e) => e.id !== "CheckNonce");
     await expect(
-      signer.signTx(Uint8Array.from([0x00, 0x00]), provided, getPeopleMetadataRaw(), 0),
+      creator(
+        makePayload(getPeopleMetadataRaw(), provided, Uint8Array.from([0x00, 0x00])),
+        {},
+        bindings,
+        false,
+      ),
     ).rejects.toThrow("Missing CheckNonce signed extension");
+  });
+
+  test("rejects a txExtVersion the chain does not authorize", async () => {
+    const creator = v5GeneralCreator(publicKey, () => fakeSignature);
+    const payload = {
+      ...makePayload(getPeopleMetadataRaw(), syntheticExtensions(), Uint8Array.from([0x00, 0x00])),
+      txExtVersion: 7,
+    };
+    await expect(creator(payload, {}, bindings, false)).rejects.toThrow(
+      "Only txExtVersion 0 is supported",
+    );
+  });
+});
+
+describe("createV5GeneralTxCreator", () => {
+  const publicKey = Uint8Array.from({ length: 32 }, (_, i) => i + 1);
+  const fakeSignature = Uint8Array.from({ length: 64 }, (_, i) => 0xf0 - i);
+
+  test("the enhancer chain passes fully-provided extensions through untouched", async () => {
+    // With every extension pre-seeded, papi's enhancers (nonce, mortality,
+    // tip, ...) must all skip — so the wrapped creator needs no bindings and
+    // produces the exact bytes of the bare creator.
+    const bindings = new Proxy(
+      {},
+      {
+        get(_, prop) {
+          throw new Error(`unexpected bindings access: ${String(prop)}`);
+        },
+      },
+    ) as any;
+    const meta = getPeopleMetadata();
+    const callData = Uint8Array.from([0x00, 0x07, 0x04, 0xab]);
+    const extensions = getSignedExtensions(meta).map((e, i) => ({
+      id: e.identifier,
+      extra: hex(Uint8Array.from([0x10 + i])),
+      additionalSigned: hex(Uint8Array.from([0x80 + i])),
+    }));
+    const payload = {
+      version: 1 as const,
+      signer: null,
+      callData: hex(callData),
+      extensions,
+      txExtVersion: null,
+      context: {
+        metadata: hex(getPeopleMetadataRaw()),
+        token: null,
+        bestBlockHeight: 0,
+        bestBlockHash: "0x00",
+        genesisHash: "0x00",
+      },
+    };
+
+    const wrapped = createV5GeneralTxCreator(publicKey, () => fakeSignature);
+    const bare = v5GeneralCreator(publicKey, () => fakeSignature);
+    expect(await wrapped(payload, {}, bindings, false)).toBe(
+      await bare(payload, {}, bindings, false),
+    );
+    expect(wrapped.publicKey).toBe(publicKey);
   });
 });
