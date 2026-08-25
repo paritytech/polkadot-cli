@@ -61,7 +61,7 @@ Each chain ships with multiple RPC endpoints from decentralized infrastructure p
 npm install -g polkadot-cli@latest
 ```
 
-This installs the `dot` command globally.
+This installs the CLI globally under two interchangeable command names: `dot` and `polkadot`. Use whichever you prefer — `dot query …` and `polkadot query …` are equivalent.
 
 ## Agent skill (Claude Code & Codex)
 

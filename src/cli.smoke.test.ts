@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "./config/types.ts";
@@ -108,5 +108,23 @@ describe("built bundle: nested --help (issue #238)", { timeout: 60_000 }, () => 
     expect(metadata.exitCode).toBe(0);
     const completions = await runBuilt(["completions", "--help"]);
     expect(completions.exitCode).toBe(0);
+  });
+});
+
+// Packaging contract (issue #261): the published package exposes the CLI under
+// both the `dot` and `polkadot` executable names, both resolving to the same
+// built bundle. This guards against accidentally dropping or diverging an alias
+// when the `bin` map is edited.
+describe("package.json bin aliases (issue #261)", () => {
+  const pkg = JSON.parse(readFileSync(join(import.meta.dir, "..", "package.json"), "utf8")) as {
+    bin: Record<string, string>;
+  };
+
+  test("exposes both `dot` and `polkadot`", () => {
+    expect(Object.keys(pkg.bin).sort()).toEqual(["dot", "polkadot"]);
+  });
+
+  test("`polkadot` points at the same entry as `dot`", () => {
+    expect(pkg.bin.polkadot).toBe(pkg.bin.dot);
   });
 });

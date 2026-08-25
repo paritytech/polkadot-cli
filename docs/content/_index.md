@@ -44,7 +44,7 @@ Install globally via npm:
 npm install -g polkadot-cli@latest
 ```
 
-This installs the `dot` command globally. Ships with Polkadot and all system parachains preconfigured with multiple fallback RPC endpoints. Add any Substrate-based chain by pointing to its RPC endpoint(s).
+This installs the CLI globally under two interchangeable command names — `dot` and `polkadot` — both resolving to the same tool (use whichever you prefer; the docs use `dot`). Ships with Polkadot and all system parachains preconfigured with multiple fallback RPC endpoints. Add any Substrate-based chain by pointing to its RPC endpoint(s).
 
 ## Agent skill (Claude Code & Codex)
 

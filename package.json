@@ -4,7 +4,8 @@
   "description": "CLI tool for querying Polkadot-ecosystem on-chain state",
   "type": "module",
   "bin": {
-    "dot": "dist/cli.mjs"
+    "dot": "dist/cli.mjs",
+    "polkadot": "dist/cli.mjs"
   },
   "files": [
     "dist"
