@@ -465,7 +465,7 @@ export const PAPI_BUILTIN_EXTENSIONS: ReadonlySet<string> = new Set([
  * expose exactly one entry, keyed 0.
  */
 export function getTransactionExtensionVersions(meta: MetadataBundle): number[] {
-  return Object.keys(meta.unified.extrinsic.signedExtensions)
+  return Object.keys(meta.unified.extrinsic.extensionsByVersion)
     .map(Number)
     .filter(Number.isInteger)
     .sort((a, b) => a - b);
@@ -487,7 +487,7 @@ export function getSignedExtensions(meta: MetadataBundle, version?: number): Sig
   if (chosen === null) return [];
   // Metadata order is normative — signing payloads encode extensions in
   // exactly this order, so never sort or normalise it.
-  return meta.unified.extrinsic.signedExtensions[chosen] ?? [];
+  return meta.unified.extrinsic.extensionsByVersion[chosen] ?? [];
 }
 
 export function getSignedExtensionNames(meta: MetadataBundle): string[] {

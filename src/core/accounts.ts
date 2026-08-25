@@ -10,8 +10,8 @@ import {
   validateMnemonic,
 } from "@polkadot-labs/hdkd-helpers";
 import { getPublicKey, HDKD, secretFromSeed, sign } from "@scure/sr25519";
-import type { PolkadotSigner } from "polkadot-api/signer";
-import { getPolkadotSigner } from "polkadot-api/signer";
+import type { SignerTxCreator } from "polkadot-api/tx-creator";
+import { getTxCreator } from "polkadot-api/tx-creator";
 import { findAccount, loadAccounts } from "../config/accounts-store.ts";
 import type { AccountsFile } from "../config/accounts-types.ts";
 import { type EnvSecret, isEnvSecret } from "../config/accounts-types.ts";
@@ -331,9 +331,9 @@ export async function resolveAccountKeypair(
   return keypairFromSecret(resolveSecret(account.secret), account.derivationPath);
 }
 
-export async function resolveAccountSigner(name: string): Promise<PolkadotSigner> {
+export async function resolveAccountSigner(name: string): Promise<SignerTxCreator> {
   const keypair = await resolveAccountKeypair(name);
-  return getPolkadotSigner(keypair.publicKey, "Sr25519", keypair.sign);
+  return getTxCreator(keypair.publicKey, "Sr25519", keypair.sign);
 }
 
 export async function resolveAccountExpandedSecret(name: string): Promise<Uint8Array> {
