@@ -1,9 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCli } from "../commands/__fixtures__/run-cli.ts";
-import { findExternalCommand, isExternalCommandCandidate } from "./external-command.ts";
+import {
+  findExternalCommand,
+  isExternalCommandCandidate,
+  runExternalCommand,
+} from "./external-command.ts";
 
 describe("isExternalCommandCandidate", () => {
   test("accepts bare words", () => {
@@ -48,6 +52,46 @@ describe("findExternalCommand", () => {
   test("returns null for missing plugins and non-candidates", () => {
     expect(findExternalCommand("no-such-plugin-xyz")).toBeNull();
     expect(findExternalCommand("query.System")).toBeNull();
+  });
+});
+
+describe("runExternalCommand", () => {
+  let pluginDir: string;
+
+  beforeAll(() => {
+    pluginDir = mkdtempSync(join(tmpdir(), "dot-plugin-run-"));
+    // Writes argv and DOT_BIN to a file (stdio is inherited, so stdout is not
+    // capturable here) and exits 7.
+    const bin = join(pluginDir, "dot-runplugin");
+    writeFileSync(
+      bin,
+      `#!/bin/sh\necho "args=[$@] DOT_BIN=$DOT_BIN" > "${pluginDir}/out"\nexit 7\n`,
+    );
+    chmodSync(bin, 0o755);
+  });
+
+  afterAll(() => {
+    rmSync(pluginDir, { recursive: true, force: true });
+  });
+
+  test("forwards args, sets DOT_BIN, returns the plugin's exit code", () => {
+    const code = runExternalCommand(join(pluginDir, "dot-runplugin"), ["vote", "312", "--json"]);
+    expect(code).toBe(7);
+    const out = readFileSync(join(pluginDir, "out"), "utf8");
+    expect(out).toContain("args=[vote 312 --json]");
+    expect(out).toMatch(/DOT_BIN=\S+/);
+  });
+
+  test("returns 1 with a message when the binary cannot be spawned", () => {
+    const errors: string[] = [];
+    const orig = console.error;
+    console.error = (msg: string) => void errors.push(msg);
+    try {
+      expect(runExternalCommand(join(pluginDir, "dot-does-not-exist"), [])).toBe(1);
+    } finally {
+      console.error = orig;
+    }
+    expect(errors.join("\n")).toContain("Failed to run");
   });
 });
 
