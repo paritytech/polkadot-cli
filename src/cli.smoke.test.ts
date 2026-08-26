@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "./config/types.ts";
@@ -40,6 +40,7 @@ async function build(): Promise<void> {
 
 async function runBuilt(
   args: string[],
+  extraEnv: Record<string, string> = {},
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const tmpHome = mkdtempSync(join(tmpdir(), "dot-smoke-"));
   const dotDir = join(tmpHome, ".polkadot");
@@ -47,7 +48,7 @@ async function runBuilt(
   writeFileSync(join(dotDir, "config.json"), JSON.stringify(DEFAULT_CONFIG));
   try {
     const proc = Bun.spawn(["node", BUNDLE, ...args], {
-      env: { ...process.env, HOME: tmpHome, DOT_HOME: dotDir },
+      env: { ...process.env, HOME: tmpHome, DOT_HOME: dotDir, ...extraEnv },
       cwd: tmpHome,
       stdout: "pipe",
       stderr: "pipe",
@@ -108,5 +109,48 @@ describe("built bundle: nested --help (issue #238)", { timeout: 60_000 }, () => 
     expect(metadata.exitCode).toBe(0);
     const completions = await runBuilt(["completions", "--help"]);
     expect(completions.exitCode).toBe(0);
+  });
+});
+
+// The external-plugin fallback runs for every unknown first token — including
+// typos — and once used `Bun.which`/`Bun.spawnSync`. Source-level tests spawn
+// the CLI with `bun`, where that works, so `dot accouts` printing
+// "Bun is not defined" under node went unnoticed. These tests pin the two
+// code paths on the real runtime. (biome's `noRestrictedGlobals` bans the
+// `Bun` global in shipped source as the first line of defence.)
+// @ts-expect-error Bun supports describe(label, options, fn) at runtime
+describe("built bundle: unknown command and plugin dispatch (node)", { timeout: 60_000 }, () => {
+  let pluginDir: string;
+
+  beforeAll(async () => {
+    await build();
+    pluginDir = mkdtempSync(join(tmpdir(), "dot-smoke-plugin-"));
+    const bin = join(pluginDir, "dot-smokeplugin");
+    writeFileSync(bin, '#!/bin/sh\necho "plugin-ran args=[$@]"\necho "DOT_BIN=$DOT_BIN"\nexit 7\n');
+    chmodSync(bin, 0o755);
+  });
+  afterAll(() => {
+    rmSync(BUNDLE, { force: true });
+    rmSync(pluginDir, { recursive: true, force: true });
+  });
+
+  const pathEnv = () => ({ PATH: `${pluginDir}:${process.env.PATH}` });
+
+  test("a typo'd command prints the unknown-command error, not a runtime crash", async () => {
+    const { stdout, stderr, exitCode } = await runBuilt(["accouts"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Unknown command "accouts"');
+    expect(stderr).toContain('No "dot-accouts" plugin found on PATH');
+    expect(stdout + stderr).not.toMatch(/Bun is not defined|ReferenceError/);
+  });
+
+  test("dot <name> runs dot-<name>, forwards args, passes exit code through", async () => {
+    const { stdout, exitCode } = await runBuilt(
+      ["smokeplugin", "vote", "312", "--json"],
+      pathEnv(),
+    );
+    expect(stdout).toContain("plugin-ran args=[vote 312 --json]");
+    expect(stdout).toMatch(/DOT_BIN=\S+/);
+    expect(exitCode).toBe(7);
   });
 });

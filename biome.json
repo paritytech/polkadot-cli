@@ -18,7 +18,15 @@
   "linter": {
     "rules": {
       "style": {
-        "noNonNullAssertion": "off"
+        "noNonNullAssertion": "off",
+        "noRestrictedGlobals": {
+          "level": "error",
+          "options": {
+            "deniedGlobals": {
+              "Bun": "The published CLI runs under node (dist/cli.mjs has a node shebang), where the Bun global does not exist. Use node:* APIs in shipped source; Bun is only allowed in tests and test fixtures."
+            }
+          }
+        }
       },
       "suspicious": {
         "noExplicitAny": "off"
@@ -32,6 +40,16 @@
         "rules": {
           "suspicious": {
             "noTemplateCurlyInString": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/**/*.test.ts", "src/**/__fixtures__/**", "src/test-helpers/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": "off"
           }
         }
       }

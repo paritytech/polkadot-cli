@@ -7,7 +7,17 @@
  * lets domain-specific tooling extend `dot` without the CLI loading any
  * third-party code into its own process: plugins are ordinary child processes
  * that talk to `dot` the same way a user does.
+ *
+ * Node-only APIs here, deliberately: the published `dist/cli.mjs` runs under
+ * `node`, where the `Bun` global does not exist. This module is the fallback
+ * for every unknown first token — including typos — so a Bun-ism in it
+ * surfaces to users as "Bun is not defined" instead of the unknown-command
+ * error (biome's `noRestrictedGlobals` now bans `Bun` in shipped source).
  */
+
+import { spawnSync } from "node:child_process";
+import { accessSync, constants, statSync } from "node:fs";
+import { delimiter, join } from "node:path";
 
 export const PLUGIN_PREFIX = "dot-";
 
@@ -21,12 +31,38 @@ export function isExternalCommandCandidate(name: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name);
 }
 
-/** Resolve `dot-<name>` on PATH. Returns the absolute path, or null. */
+function isExecutableFile(path: string): boolean {
+  try {
+    if (!statSync(path).isFile()) return false;
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve `dot-<name>` on PATH. Returns the absolute path, or null.
+ *
+ * Reads `process.env.PATH` at call time so tests (and plugins that mutate PATH
+ * before invoking `dot`) are honoured. On Windows, executables carry one of the
+ * `PATHEXT` suffixes, so each candidate is tried with those as well.
+ */
 export function findExternalCommand(name: string): string | null {
   if (!isExternalCommandCandidate(name)) return null;
-  // Pass PATH explicitly: Bun.which snapshots the environment at startup and
-  // would miss runtime process.env.PATH changes otherwise.
-  return Bun.which(`${PLUGIN_PREFIX}${name}`, { PATH: process.env.PATH ?? "" });
+  const file = `${PLUGIN_PREFIX}${name}`;
+  const suffixes =
+    process.platform === "win32"
+      ? ["", ...(process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";").filter(Boolean)]
+      : [""];
+  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+    if (!dir) continue;
+    for (const suffix of suffixes) {
+      const candidate = join(dir, file + suffix);
+      if (isExecutableFile(candidate)) return candidate;
+    }
+  }
+  return null;
 }
 
 /**
@@ -37,9 +73,15 @@ export function findExternalCommand(name: string): string | null {
  * instead of whatever `dot` happens to be first on PATH.
  */
 export function runExternalCommand(binPath: string, args: string[]): number {
-  const result = Bun.spawnSync([binPath, ...args], {
-    stdio: ["inherit", "inherit", "inherit"],
+  const result = spawnSync(binPath, args, {
+    stdio: "inherit",
     env: { ...process.env, DOT_BIN: process.argv[1] ?? "dot" },
   });
-  return result.exitCode ?? 1;
+  if (result.error) {
+    console.error(`Failed to run "${binPath}": ${result.error.message}`);
+    return 1;
+  }
+  // Killed by a signal → status is null; mirror shell convention (128 + signo
+  // is not portable in JS, so fall back to 1).
+  return result.status ?? 1;
 }
