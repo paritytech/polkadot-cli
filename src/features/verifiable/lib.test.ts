@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { toHex } from "../../core/hash.ts";
 import {
   bandersnatchSign,
-  compactEncode,
   DEFAULT_RING_EXPONENT,
   deriveAlias,
   deriveMemberEntropy,
@@ -39,18 +38,9 @@ describe("encodeContext", () => {
   });
 });
 
-describe("compactEncode", () => {
-  test.each([
-    [0, "0x00"],
-    [1, "0x04"],
-    [63, "0xfc"],
-    [64, "0x0101"],
-  ])("compact(%i) = %s", (n, expected) => {
-    expect(toHex(compactEncode(n as number))).toBe(expected as string);
-  });
-});
-
 describe("encodeMembers", () => {
+  // encodeMembers delegates to verifiablejs `encode_members`; these pin the wire
+  // layout we depend on rather than re-testing the upstream implementation.
   test("encodes Vec<[u8;32]> as compact len + raw concat", () => {
     const a = new Uint8Array(32).fill(0x11);
     const b = new Uint8Array(32).fill(0x22);
@@ -59,6 +49,10 @@ describe("encodeMembers", () => {
     expect(enc[0]).toBe(0x08); // compact(2) = 2 << 2
     expect(toHex(enc.slice(1, 33))).toBe(`0x${"11".repeat(32)}`);
     expect(toHex(enc.slice(33))).toBe(`0x${"22".repeat(32)}`);
+  });
+
+  test("encodes an empty ring as a bare compact(0)", () => {
+    expect(toHex(encodeMembers([]))).toBe("0x00");
   });
 
   test("rejects non-32-byte members", () => {
