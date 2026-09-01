@@ -147,7 +147,7 @@ export function ringProve(
 /**
  * Locally verify a ring-VRF proof, returning the recovered 32-byte alias or
  * throwing on failure. Pass either the SCALE-encoded `members` (`validate`) or
- * the 768-byte ring `commitment` / root as stored on chain
+ * the 288-byte ring `commitment` / root as stored on chain
  * (`validate_with_commitment` — the recommended pre-flight before submitting).
  */
 export function verifyRingProof(
@@ -166,7 +166,7 @@ export function verifyRingProof(
   throw new Error("verifyRingProof requires either `members` or `commitment`");
 }
 
-/** Compute the 768-byte ring root (MembersCommitment) from encoded members. */
+/** Compute the 288-byte ring root (MembersCommitment) from encoded members. */
 export function ringRoot(ringExp: RingExponent, members: Uint8Array): Uint8Array {
   return members_root(ringExp, members);
 }

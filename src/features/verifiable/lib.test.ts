@@ -131,10 +131,11 @@ describe("ring proof", () => {
     expect(toHex(recovered)).toBe(toHex(alias));
   });
 
-  test("verifies against the 768-byte ring root (commitment)", () => {
+  test("verifies against the 288-byte ring root (commitment)", () => {
     const { proof, alias } = ringProve(DEFAULT_RING_EXPONENT, entropy, members, context, message);
     const commitment = ringRoot(DEFAULT_RING_EXPONENT, members);
-    expect(commitment.length).toBe(768);
+    // Pins the verifiablejs wire size (was 768 before 1.6.0 / verifiable 0.3.0).
+    expect(commitment.length).toBe(288);
     const recovered = verifyRingProof(
       DEFAULT_RING_EXPONENT,
       proof,

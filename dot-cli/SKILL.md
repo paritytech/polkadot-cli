@@ -721,7 +721,7 @@ dot verifiable prove alice --entropy-key candidate --context dotns \
     --message 0x<challenge> --members 0x<members> --json                  # { alias, proof }
 dot verifiable verify --proof 0x<proof> --context dotns \
     --message 0x<challenge> --members 0x<members>                         # exit 1 if invalid
-# prove/verify accept --root <768-byte commitment> instead of --members; all hex args also accept a file path.
+# prove/verify accept --root <288-byte commitment> instead of --members; all hex args also accept a file path.
 ```
 
 ## Key Flags

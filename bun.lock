@@ -15,7 +15,7 @@
         "@scure/sr25519": "^1.0.0",
         "cac": "^7.0.0",
         "polkadot-api": "^3.0.0",
-        "verifiablejs": "1.4.0",
+        "verifiablejs": "1.6.0",
         "yaml": "^2.9.0",
       },
       "devDependencies": {
@@ -553,7 +553,7 @@
 
     "validate-npm-package-license": ["validate-npm-package-license@3.0.4", "", { "dependencies": { "spdx-correct": "^3.0.0", "spdx-expression-parse": "^3.0.0" } }, "sha512-DpKm2Ui/xN7/HQKCtpZxoRWBhZ9Z0kqtygG8XCgNQ8ZlDnxuQmWhj566j8fN4Cu3/JmbhsDo7fcAJq4s9h27Ew=="],
 
-    "verifiablejs": ["verifiablejs@1.4.0", "", {}, "sha512-piCbBR+s1RzokeF0cQV0EZI1mccQGmmSwojDxzLdvS3J/ZLi2PeMtcvd3xQYPuw8DE/+2rELwHQJhQY59Rf69w=="],
+    "verifiablejs": ["verifiablejs@1.6.0", "", {}, "sha512-JFkmQQsf4NHNng10cUl+0G+Hkb0W722r7BbDI7iheXG3o3Ux0XawNKYxh3rXiBmUCbRw3AcZHx+Rcw1a+xW6GQ=="],
 
     "which": ["which@2.0.2", "", { "dependencies": { "isexe": "^2.0.0" }, "bin": { "node-which": "./bin/node-which" } }, "sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA=="],
 
