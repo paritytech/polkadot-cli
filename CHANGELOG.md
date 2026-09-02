@@ -1,5 +1,95 @@
 # polkadot-cli
 
+## 1.25.0
+
+### Minor Changes
+
+- d9d11e3: Negotiate the highest supported metadata version instead of pinning v15. The CLI now asks the runtime via `Metadata_metadata_versions` and fetches the best version both sides support (currently up to v16; runtimes without that API fall back to v14 via `state_getMetadata`).
+
+  This also fixes a live cache inconsistency: read commands pinned v15 while `dot tx` let polkadot-api write its own v16 fetch into the same `metadata.bin` with no fingerprint, so which version the CLI operated on depended on command history. The CLI is now the only cache writer, the fingerprint sidecar records the metadata version and the chain's supported versions, and a cache that is below the negotiated target (including every pre-existing install, whose sidecar has no version info) is refreshed automatically on the next connected command — no extra RPC in the steady state.
+
+- 3f81c6c: Refresh the built-in RPC endpoints — every shipped endpoint was health-checked, dead ones removed, and working alternatives added in their place.
+
+  The big change is that **IBP is gone**. Both of its domains have been decommissioned: every `*.ibp.network` hostname now returns `NXDOMAIN` (the zone is stripped down to its apex), and `dotters.network` has a broken delegation that returns `SERVFAIL` from every resolver. IBP was the _primary_ endpoint for both relay chains, so out of the box the CLI was spending its first connection attempt on a name that no longer resolves. polkadot-js/apps removed the same endpoints wholesale in June 2026 after progressive removals in February and April, so this is a sustained decommission rather than an outage to wait out.
+
+  Also removed, all confirmed dead: Dwellir's `*-tn.dwellir.com` hosts, `rpc.amforc.com`, `rpc.permanence.io` and `rpc.subquery.network` (all `NXDOMAIN`), plus every `*.public.curie.radiumblock.co` endpoint — those still resolve and serve valid TLS, but Cloudflare returns `522` because the origin nodes are unreachable.
+
+  Added, each verified to sync and report the expected genesis hash: Gatotech, Stakeworld, Helixstreet, interweb, Rotko and TurboFlakes endpoints across the Polkadot and Paseo chains. Dwellir replaces IBP as the relay primary; `wss://rpc.polkadot.io` deliberately stays the last-resort fallback so the default path still favours independent providers.
+
+  Two new preconfigured chains: **`polkadot-bulletin`** and **`paseo-bulletin`**, both para 1010 on their respective relays and both verified registered and following the relay head. The Bulletin chains are listed by polkadot-js/apps and papi-console but were missing here. Note that Parity does not currently serve a working Paseo Bulletin endpoint, so that chain relies on community providers (SIK, StakingLand, TunaStaking).
+
+  Rotko endpoints were added across every Polkadot chain (relay, asset hub, bridge hub, collectives, coretime, people) and TurboFlakes for asset hub and people, which meaningfully thickens the fallback list for the Polkadot system chains — several of them previously had their non-Parity options reduced to two once IBP and RadiumBlock came out.
+
+  Endpoint rotation itself needed no new code — polkadot-api's WS provider already walks the configured list on each reconnect attempt, so an unreachable endpoint is skipped automatically. What it did need was a shorter leash: the connection timeout drops from 10s to 4s. Endpoints that refuse outright (DNS failure, connection refused) fail fast and never hit the timeout, but one that accepts the socket and then stalls — a dead node behind a live proxy, exactly the RadiumBlock `522` case — burns it in full before the next endpoint is tried. Worst-case rotation past a stalled endpoint goes from ~10.5s to ~4.5s, while a healthy default connection is unaffected at ~0.5s.
+
+  **Breaking:** `paseo-bridge-hub`, `paseo-collectives` and `paseo-coretime` are no longer preconfigured. They had no reachable endpoints, and querying the Paseo relay's `Paras.ParaLifecycles` confirms paras 1001, 1002 and 1005 are not registered — those chains do not exist on Paseo, so there is nothing to point at. Asset Hub (1000) and People (1004) are the only Paseo system parachains, and both remain. Anyone relying on the old names can still add them with `dot chain add`.
+
+- 5e6533a: Rename `--unsigned` to `--general`. The flag builds an extrinsic v5 _general_ transaction (`0x45`), which is not "unsigned" — it has no signature field of its own, and authorization (a signature or another mechanism) lives in the transaction extensions instead. `--unsigned` (and the `unsigned: true` file key) keeps working as a deprecated alias that prints a warning to stderr. Human-readable output now labels these transactions `general (v5)`, and the `--json` output field for general dry-runs/submissions is renamed from `unsigned: true` to `general: true`. Closes #306.
+- fc22c0f: Upgrade `polkadot-api` 2.2.2 → 3.0.0 (with `@polkadot-api/metadata-builders` 0.15.0, `substrate-bindings` 0.21.0, `view-builder` 0.6.0, `metadata-compatibility` 0.7.0). Unlike previous dependency batches this moves the manifest across a major, so the semver contract changes: papi v3 replaces `PolkadotSigner` with composable `TxCreator`s (`polkadot-api/signer` → `polkadot-api/tx-creator`, `sign*` tx methods → `create*`), renames the tx events (`signed` → `created`, `txBestBlocksState` → `inBestBlock`/`notInBestBlock`), and unified metadata exposes `extrinsic.extensionsByVersion` instead of `signedExtensions`.
+
+  CLI behaviour is intended to be unchanged. Two spots needed more than renames:
+
+  - `--asset` no longer needs the `customSignedExtensions` workaround: the v2 `isAssetCompat` check that rejected XCM Location JSON on the unsafe API is gone, and v3 SCALE-encodes the `asset` tx option directly via the dynamic builder — exactly what the workaround did by hand. The option is now passed through natively.
+  - v3 inverts extension-override precedence: builtin enhancers run before `customSignedExtensions` and the first payload entry per identifier wins, so `--ext` overrides of builtin extensions (the contract fixed in "fix-ext-builtin-overrides") would be silently dropped. A `withExtensionOverrides` wrapper pre-seeds the user's encoded overrides into the creator payload — every v3 builtin enhancer (nonce included) skips identifiers already present — keeping user overrides authoritative.
+
+  Fee estimation now runs the full creator chain with a mocked signature (`getEstimatedFees(txCreator)` instead of a public key), so estimates reflect the actual extension encoding. Verified against Paseo: dry-run fees, an `--ext ChargeTransactionPayment` override (fee shifted by exactly the one-byte compact-length difference, proving the override encodes), and unsigned v5 general-tx encoding.
+
+### Patch Changes
+
+- 81c5147: Update dependencies that are safe to move without behaviour changes, and clear the one security advisory that sat on the shipped runtime path.
+
+  `polkadot-api` goes 2.1.7 → 2.2.2, `@noble/hashes` 2.0.1 → 2.3.0 and `yaml` 2.8.3 → 2.9.0; on the dev side `@biomejs/biome` 2.4.5 → 2.5.8, `@changesets/cli` 2.29.8 → 2.31.1 and `@types/bun` 1.3.9 → 1.3.14. All six are in-range minor/patch bumps, so the semver contract the manifest already committed to is unchanged — the ranges are just pulled forward to the versions actually installed.
+
+  The `ws` advisories ([GHSA-96hv-2xvq-fx4p](https://github.com/advisories/GHSA-96hv-2xvq-fx4p), high, memory-exhaustion DoS; [GHSA-58qx-3vcg-4xpx](https://github.com/advisories/GHSA-58qx-3vcg-4xpx), moderate, uninitialized memory disclosure) reach the CLI through `polkadot-api › @polkadot-api/sm-provider › @polkadot-api/smoldot › smoldot › ws`, which is the smoldot light-client path in a shipped build rather than dev-only tooling. `smoldot` asks for `ws@^8.8.1` and resolved 8.19.0, inside the vulnerable `>=8.0.0 <8.20.1` window; an `overrides` entry pins it to `^8.21.3`, still within smoldot's own range, so nothing upstream is being forced across a major.
+
+  Two advisories deliberately remain, both confined to dev/build tooling and neither reachable from the published CLI. `picomatch <2.3.2` is pinned by `micromatch@4.0.8` under `@changesets/git`, and `unplugin-utils` in the papi build chain requires `picomatch@^4`, so a blanket override would have to break one to fix the other. `js-yaml@3.14.2` arrives via `@manypkg/get-packages › read-yaml-file`, which uses the v3 API; the fix only exists in 4.x. Both need upstream releases, not an override here.
+
+  Also held back: `@polkadot-labs/hdkd`, `@polkadot-labs/hdkd-helpers` and `@scure/sr25519`. These are one coupled cluster, not three independent bumps — `hdkd@0.0.29` requires `hdkd-helpers@~0.0.31`, which in turn requires `@scure/sr25519@^2.2.0`, a v1 → v2 major on the library that performs sr25519 key derivation and signing. That belongs in its own change where signature and address compatibility can be verified against known keys, so it is left alone here.
+
+  The biome bump surfaced one new `useOptionalChain` warning in `src/skill-marketplace.test.ts` and a stale `$schema` pin in `biome.json`; both are fixed so `bun run lint` stays clean.
+
+- 9fbc3dd: Document what is safe to commit from a `.polkadot/` workspace, and how env-backed accounts make that possible in CI.
+
+  `dot init` deliberately writes no `.gitignore` and the docs left the decision at "your call", which is unhelpful precisely where the stakes are highest. The new guidance — in the README, the docs site, and the bundled `dot-cli` skill — is per-file rather than wholesale:
+
+  - `.polkadot/config.json` is the thing worth sharing: it pins the chains and endpoints a repo talks to, so a clone plus `dot chain update` is a working setup.
+  - `.polkadot/chains/` should be ignored. It is a regenerable cache, roughly 450 KB of binary metadata per chain, rewritten by every runtime upgrade.
+  - `.polkadot/update-check.json` should be ignored; it is the update-notifier timestamp.
+  - `.polkadot/accounts.json` is committable only while every entry is env-backed (`--env`) or watch-only. Those entries store a variable name or a public key and no key material, so the file carries nothing secret.
+
+  That last point is a property of the file's current contents rather than of the format — one `dot account create` in the same directory writes a mnemonic into the same tracked file — so the guidance ships with a one-line guard suitable for CI or a pre-commit hook:
+
+  ```bash
+  jq -e '[.accounts[].secret | select(type == "string")] | length == 0' .polkadot/accounts.json
+  ```
+
+  Also documented explicitly: **the CLI does not read `.env` files.** It reads environment variables and nothing else, so a `.env` next to a workspace has no effect until something loads it (`set -a; source .env; set +a`, direnv, `dotenvx run --`). In CI the file is unnecessary — the runner's secret store supplies the variable directly. Related, and previously undocumented: `dot account add --env` works with the variable unset, recording an empty public key and reporting `Address will resolve when $VAR is set.`, so a repository can define its CI signer on a machine that never holds the secret.
+
+  No behaviour changes — documentation and the bundled skill only.
+
+- e8f93a7: Fix `--ext` silently ignoring overrides for builtin transaction extensions. The builtin skip ran before the user-override check, so e.g. `--ext '{"CheckMetadataHash":…}'` was parsed and then dropped without warning, making `CheckMetadataHash` unreachable by any route. User overrides now take priority over the builtin skip (polkadot-api itself checks `customSignedExtensions` before its own handling, so the value wins downstream). Passing an extension name the chain's metadata doesn't declare is now a clear error instead of being silently ignored.
+- c482ea7: Fix `Error: Bun is not defined` when running an unknown command (e.g. a typo like `dot accouts`) with the published Node build. The `dot-<name>` plugin lookup now uses Node APIs; the proper "Unknown command" error is shown again and plugin dispatch works under Node.
+- dd4ae41: Fix `--from` and `--chain` value completion in zsh once other arguments precede the flag.
+
+  The generated zsh completer collected the words before the cursor with `local preceding=("${words[2,CURRENT-1]}")`. A quoted subscript range in zsh expands to a _single_ word, so `dot polkadot.tx.Balances.transfer_keep_alive bob 100 --from <Tab>` handed the completer one argument — `"polkadot.tx.Balances.transfer_keep_alive bob 100 --from"` — instead of four. Not finding a recognisable flag at the end, it fell back to the top-level candidate list, so the Tab offered subcommands and chain names where account names were expected.
+
+  Adding the `(@)` flag (`"${(@)words[2,CURRENT-1]}"`) keeps the words separate. The bug only showed up with two or more preceding words, which is why the documented `dot --from <Tab>` case worked: joining a one-element array is a no-op. The bash and fish completers were already correct — bash slices with `"${COMP_WORDS[@]:1:COMP_CWORD-1}"` and fish uses `(commandline -opc)`, both of which preserve word boundaries.
+
+  Found while recording the tab-completion demo tape, where the `--from <Tab>` beat listed every subcommand instead of `alice`, `bob`, …
+
+- b57554d: Record the five remaining showcase tapes — `chains`, `dry-run`, `sovereign`, `xcm-file` and `did-you-mean` — and embed them in the README and on the docs site next to the features they demonstrate.
+
+  Fixes the `transfer.xcm.yaml` example the file-based docs link to: it named `people-paseo`, a chain key that no longer exists, so the documented invocation failed with `Unknown chain`.
+
+- c6a7fda: Select the transaction-extension version from metadata instead of taking the first key. `getSignedExtensions` now uses the highest version in `transaction_extensions_by_version` (matching subxt), `buildGeneralTx` derives the v5 preamble's extension-version byte from that same key instead of hardcoding `0x00`, and `dot <chain>.extensions` surfaces which extension version it is displaying (`extensionVersion` / `availableVersions` in `--json`). Also fixes the `--unsigned` output label, which claimed `unsigned (bare)` while actually emitting a v5 General extrinsic. No behavior change on any live chain today — they all expose exactly version `{0}` — but wrong the moment one doesn't.
+- 4358707: Upgrade `verifiablejs` from `1.4.0` to `1.6.0`, which pulls in the `verifiable` crate `0.3.0` bump.
+
+  The one wire-format consequence is the ring root: `members_root` (behind `dot verifiable prove`/`verify --root`) now returns a **288-byte** `MembersCommitment` instead of 768 bytes. Member keys, aliases, signatures and the 785-byte ring proof are all byte-identical to 1.4.0 — the pinned Alice vectors in `src/features/verifiable/lib.test.ts` and `commands.test.ts` still hold — so only a `--root` value matters here. A root captured from a chain running the older `verifiable` revision will no longer validate; re-read it from the chain (or recompute it from the members set) rather than reusing a stored 768-byte blob.
+
+  Help text, docs and the bundled `dot-cli` skill are updated to quote the new size.
+
+  1.6.0 also adds an `encode_members` helper, so `encodeMembers` in `src/features/verifiable/lib.ts` now delegates to it instead of hand-rolling the SCALE `Vec<[u8; 32]>` layout. Output is byte-identical for every input (verified against the old implementation, including the empty ring and non-curve-point keys); the local `compactEncode` helper and the `@polkadot-api/substrate-bindings` `compact` import it existed for are gone.
+
 ## 1.24.0
 
 ### Minor Changes
