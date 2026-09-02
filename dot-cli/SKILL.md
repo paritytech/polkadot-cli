@@ -24,7 +24,7 @@ dot [chain.]<category>[.Pallet[.Item]] [args] [options]
 
 Categories: `query`, `tx`, `apis`, `const`, `events`, `errors`, `extensions`, `rpc`
 
-Top-level commands: `dot inspect`, `dot metadata`, `dot chain`, `dot account`, `dot sign`, `dot hash`, `dot verifiable`, `dot init`, `dot which`.
+Top-level commands: `dot inspect`, `dot metadata`, `dot chain`, `dot account`, `dot sign`, `dot hash`, `dot verifiable` (alias: `dot bandersnatch`), `dot init`, `dot which`.
 
 State (accounts, custom chains, metadata cache) lives in a config root resolved per run: `DOT_HOME` env var → a local `.polkadot/` workspace discovered from cwd → global `~/.polkadot`. Run `dot which` to see which one is active, and see [Local Workspaces](#local-workspaces) for isolated per-directory setups. Set `DOT_DRY_RUN=1` to force every extrinsic to dry-run instead of submitting (see [Submitting Transactions](#submitting-transactions)).
 
@@ -698,7 +698,7 @@ dot polkadot.tx.System.remark 0xdeadbeef --to-yaml
 
 ## Verifiable (Bandersnatch / Ring-VRF)
 
-`dot verifiable` is raw, unopinionated Bandersnatch/Ring-VRF crypto — bytes in, bytes out, no chain knowledge (like `dot sign` is just sr25519). It does no fetching: you supply the members/context/message (e.g. read from chain with `dot` first), and use the resulting signature/proof however you need — e.g. as a value in a `dot` extrinsic or signed extension. All actions take `--output json` and hex / `--file` / `--stdin` input, so they compose.
+`dot verifiable` is raw, unopinionated Bandersnatch/Ring-VRF crypto — bytes in, bytes out, no chain knowledge (like `dot sign` is just sr25519). It does no fetching: you supply the members/context/message (e.g. read from chain with `dot` first), and use the resulting signature/proof however you need — e.g. as a value in a `dot` extrinsic or signed extension. All actions take `--output json` and hex / `--file` / `--stdin` input, so they compose. `dot bandersnatch` is an alias for `dot verifiable` (identical in every form).
 
 Two distinct inputs — do not conflate:
 - `--entropy-key <text|0xhex>`: keyed-blake2b key turning the mnemonic into member entropy. Omit = lite person; `candidate` = full person. NOT a derivation path, NOT the ring context.
