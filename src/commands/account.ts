@@ -230,11 +230,12 @@ async function accountCreate(
   const hexPub = publicKeyToHex(publicKey);
   const address = toSs58(publicKey);
 
-  // Auto-derive Bandersnatch member keys (unkeyed + candidate)
+  // Auto-derive the two RFC-0022 personhood member keys (//peopl.dot//0 and //1).
   const { deriveBandersnatchMember } = await import("../features/verifiable/lib.ts");
-  const bandersnatch: Record<string, string> = {};
-  bandersnatch[""] = publicKeyToHex(deriveBandersnatchMember(mnemonic));
-  bandersnatch.candidate = publicKeyToHex(deriveBandersnatchMember(mnemonic, "candidate"));
+  const bandersnatch: Record<string, string> = {
+    full: publicKeyToHex(deriveBandersnatchMember(mnemonic, "full")),
+    lite: publicKeyToHex(deriveBandersnatchMember(mnemonic, "lite")),
+  };
 
   accountsFile.accounts.push({
     name,
@@ -264,8 +265,8 @@ async function accountCreate(
   console.log(`  ${BOLD}Name:${RESET}          ${name}`);
   if (path) console.log(`  ${BOLD}Path:${RESET}          ${path}`);
   console.log(`  ${BOLD}Address:${RESET}       ${address}`);
-  console.log(`  ${BOLD}Bandersnatch:${RESET}  ${bandersnatch[""]}`);
-  console.log(`    ${BOLD}(candidate)${RESET}  ${bandersnatch.candidate}`);
+  console.log(`  ${BOLD}Bandersnatch:${RESET}  ${bandersnatch.full} ${BOLD}(full)${RESET}`);
+  console.log(`                 ${bandersnatch.lite} ${BOLD}(lite)${RESET}`);
   console.log(`  ${BOLD}Mnemonic:${RESET}      ${mnemonic}`);
   console.log();
   console.log(
@@ -1135,7 +1136,8 @@ async function accountInspect(
         if (i === 0) {
           console.log(`  ${BOLD}Bandersnatch:${RESET}${label ? ` ${label}` : ""} ${hex}`);
         } else {
-          console.log(`               ${label ? `${label} ` : ""}${hex}`);
+          // Align the hex under the first row's, past the "  Bandersnatch: " label.
+          console.log(`                ${label ? `${label} ` : ""}${hex}`);
         }
       }
     }

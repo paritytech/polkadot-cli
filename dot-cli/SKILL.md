@@ -701,23 +701,29 @@ dot polkadot.tx.System.remark 0xdeadbeef --to-yaml
 `dot verifiable` is raw, unopinionated Bandersnatch/Ring-VRF crypto — bytes in, bytes out, no chain knowledge (like `dot sign` is just sr25519). It does no fetching: you supply the members/context/message (e.g. read from chain with `dot` first), and use the resulting signature/proof however you need — e.g. as a value in a `dot` extrinsic or signed extension. All actions take `--output json` and hex / `--file` / `--stdin` input, so they compose.
 
 Two distinct inputs — do not conflate:
-- `--entropy-key <text|0xhex>`: keyed-blake2b key turning the mnemonic into member entropy. Omit = lite person; `candidate` = full person. NOT a derivation path, NOT the ring context.
-- `--context <text|0xhex>`: the 32-byte ring/proof namespace (zero-padded right, like `bytes32()`). Determines the alias. Used by `alias`/`prove`/`verify`.
+- `--person full|lite`: which RFC-0022 personhood key to derive. `full` (default) = `//peopl.dot//0`, ring `pop:polkadot.network/people`; `lite` = `//peopl.dot//1`, ring `pop:polkadot.network/people-lite`. Two keys held at once, not a rotation. `--product <id>` overrides the reserved `peopl.dot` product id — escape hatch only, since the reference apps pin it on every network.
+- `--context <text|0xhex>`: the 32-byte ring/proof namespace (zero-padded right, like `bytes32()`). Determines the alias. Used by `alias`/`prove`/`verify`. NOT part of key derivation — `member` rejects it (it once selected the legacy entropy key there; that is `--entropy-key` now).
+
+Two more tiers exist for the secret: `--entropy-key <k>` selects the **legacy** pre-RFC-0022 scheme (one keyed blake2b over the BIP39 entropy; `candidate` = full, omitted = lite) for identities registered before the cutover, and `--entropy 0x<64hex>` uses 32 bytes **verbatim** (0x-hex only) with no derivation and no account. Combining tiers — including `--person` with `--product` — is an error; every command reports the scheme used (JSON `scheme`: `rfc-0022` | `legacy` | `raw`).
 
 ```bash
-# Member key (who you are in a ring). Omit --entropy-key for a lite person.
-dot verifiable alice --entropy-key candidate --json   # { account, memberKey, entropyKey }
+# Member key (who you are in a ring). Defaults to the full person.
+dot verifiable alice --json                # { account, scheme, person, product, path, memberKey }
+dot verifiable alice --person lite --json
+dot verifiable alice --product dim2.dot --index 1 --json   # any RFC-0022 path
+dot verifiable alice --entropy-key candidate --json        # legacy pre-RFC-0022 key
+dot verifiable --entropy 0x<64hex> --json                  # raw secret, no account
 
 # Alias = stable pseudonym for a context (deterministic in entropy + context)
-dot verifiable alias alice --entropy-key candidate --context dotns --json
+dot verifiable alias alice --context dotns --json
 
 # Sign / verify a plain Bandersnatch signature (64 bytes)
-dot verifiable sign alice --message "gm" --entropy-key candidate --json   # { signature, member, ... }
+dot verifiable sign alice --message "gm" --json                            # { signature, member, ... }
 dot verifiable verify-sig --signature 0x… --member 0x… --message "gm"     # exit 0 = valid, 1 = invalid
 
 # Ring proof: encode a ring, prove membership bound to a challenge, verify locally
 dot verifiable members 0x<key> 0x<key> --json                             # { members } (SCALE Vec<[u8;32]>)
-dot verifiable prove alice --entropy-key candidate --context dotns \
+dot verifiable prove alice --context dotns \
     --message 0x<challenge> --members 0x<members> --json                  # { alias, proof }
 dot verifiable verify --proof 0x<proof> --context dotns \
     --message 0x<challenge> --members 0x<members>                         # exit 1 if invalid
