@@ -30,6 +30,7 @@ A command-line tool for interacting with Polkadot-ecosystem chains. Manage chain
 - ✅ File-based commands — run any command from a YAML/JSON file with variable substitution
 - ✅ Sovereign accounts — store a parachain (child / sibling) or pallet (Treasury, Bounties, NominationPools, …) sovereign as a named watch-only account in one command
 - ✅ General (v5) transactions — submit governance-authorized calls without a signer (`--general`)
+- ✅ Extrinsic V5 General signing — automatic on chains that carry `VerifyMultiSignature`, capability-checked up front (`--v4`/`--v5` to force)
 - ✅ Non-native fee payment — pay tx fees in any asset the chain accepts via `--asset` (asset-hub-style chains)
 - ✅ Message signing — sign arbitrary bytes with account keypairs for use as `MultiSignature` arguments
 - ✅ Bandersnatch member keys — derive Ring VRF member keys from mnemonics for on-chain member sets
@@ -2040,6 +2041,24 @@ tx:
 dot ./create-people-collection.yaml
 dot ./create-people-collection.yaml --dry-run
 ```
+
+### Extrinsic version selection (v4 / v5 General)
+
+The CLI signs with the highest extrinsic version the chain can actually authorize. A v5 "General" transaction has no signature field — the signature travels *inside* the `VerifyMultiSignature` transaction extension — so v5 is used only when the runtime advertises extrinsic version 5 **and** carries that extension (currently people chains on test networks; Polkadot, Kusama, and all asset hubs can't authorize v5 and get v4). Every signed transaction's output shows the version used (`Type: signed (v4)` / `signed (v5 general)`, `extrinsicVersion` in `--json`).
+
+```
+# Auto: signs v5 General on a capable chain, v4 anywhere else
+dot preview-people.tx.System.remark "hello" --from alice
+
+# Force a version (--v5 errors clearly if the chain can't authorize it)
+dot preview-people.tx.System.remark "hello" --from alice --v4
+dot polkadot.tx.System.remark "hello" --from alice --v5   # → capability error
+
+# Dry-run shows the selected version and fees (v5 fees queried directly from the runtime)
+dot preview-people.tx.System.remark "hello" --from alice --dry-run
+```
+
+The capability check runs up front: a forced `--v5` on a chain that can't authorize it is refused with a clear error instead of letting the runtime reject the submission with `UnknownOrigin`. Nonce, tip, mortality, and `--ext` overrides work identically on both paths (an `--ext` override for `VerifyMultiSignature` itself is rejected while signing v5 — that extension carries the signature; force `--v4` to set it manually).
 
 ## File-Based Commands
 

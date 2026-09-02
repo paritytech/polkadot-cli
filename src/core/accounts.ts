@@ -17,6 +17,7 @@ import type { AccountsFile } from "../config/accounts-types.ts";
 import { type EnvSecret, isEnvSecret } from "../config/accounts-types.ts";
 import { describeConfigDir } from "../config/store.ts";
 import { findClosest } from "../utils/fuzzy-match.ts";
+import { createV5GeneralTxCreator } from "./extrinsic-v5.ts";
 
 export const DEV_NAMES = ["alice", "bob", "charlie", "dave", "eve", "ferdie"] as const;
 
@@ -334,6 +335,16 @@ export async function resolveAccountKeypair(
 export async function resolveAccountSigner(name: string): Promise<SignerTxCreator> {
   const keypair = await resolveAccountKeypair(name);
   return getTxCreator(keypair.publicKey, "Sr25519", keypair.sign);
+}
+
+/** Wrap a keypair in the tx creator matching the chosen extrinsic version. */
+export function signerFromKeypair(
+  keypair: { publicKey: Uint8Array; sign: (msg: Uint8Array) => Uint8Array },
+  extrinsicVersion: 4 | 5,
+): SignerTxCreator {
+  return extrinsicVersion === 5
+    ? createV5GeneralTxCreator(keypair.publicKey, keypair.sign)
+    : getTxCreator(keypair.publicKey, "Sr25519", keypair.sign);
 }
 
 export async function resolveAccountExpandedSecret(name: string): Promise<Uint8Array> {

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { isCompatible, mapLookupToTypedef } from "@polkadot-api/metadata-compatibility";
 import { Binary } from "polkadot-api";
 import { DEFAULT_CONFIG } from "../config/types.ts";
-import { getTestMetadata } from "./__fixtures__/load-metadata.ts";
+import { getPeopleMetadata, getTestMetadata } from "./__fixtures__/load-metadata.ts";
 import { runCli } from "./__fixtures__/run-cli.ts";
 import {
   autoDefaultForType,
@@ -33,6 +33,7 @@ import {
   parseTipOption,
   parseTypedArg,
   parseWaitLevel,
+  resolveExtrinsicVersion,
   sanitizeForSerialization,
   typeHint,
 } from "./tx.ts";
@@ -1783,6 +1784,34 @@ describe("decodeCallToFileFormat", () => {
 // Layer 1: CLI integration tests (subprocess)
 // ---------------------------------------------------------------------------
 
+describe("resolveExtrinsicVersion", () => {
+  test("defaults to v4 on chains that can't authorize v5 (polkadot)", () => {
+    const { version } = resolveExtrinsicVersion(getTestMetadata(), {});
+    expect(version).toBe(4);
+  });
+
+  test("defaults to v5 on chains that carry VerifyMultiSignature (preview-people)", () => {
+    const { version, capability } = resolveExtrinsicVersion(getPeopleMetadata(), {});
+    expect(version).toBe(5);
+    expect(capability).toEqual({
+      ok: true,
+      extensionVersion: 0,
+      authIdentifier: "VerifyMultiSignature",
+    });
+  });
+
+  test("--v4 forces v4 on a v5-capable chain", () => {
+    const { version } = resolveExtrinsicVersion(getPeopleMetadata(), { v4: true });
+    expect(version).toBe(4);
+  });
+
+  test("--v5 on an incapable chain throws the capability error", () => {
+    expect(() => resolveExtrinsicVersion(getTestMetadata(), { v5: true })).toThrow(
+      "can't accept signed v5 transactions",
+    );
+  });
+});
+
 describe("dot tx CLI integration", () => {
   test("System.remark --encode outputs hex", async () => {
     const { stdout, exitCode } = await runCli(["tx.System.remark", "0xdeadbeef", "--encode"]);
@@ -1824,6 +1853,53 @@ describe("dot tx CLI integration", () => {
     const { stderr, exitCode } = await runCli(["tx.0x0001", "--encode"]);
     expect(exitCode).toBe(1);
     expect(stderr).toContain("already encoded");
+  });
+
+  test("--v5 --general rejects", async () => {
+    const { stderr, exitCode } = await runCli(["tx.System.remark", "0xaa", "--v5", "--general"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("--v4/--v5 and --general are mutually exclusive");
+  });
+
+  test("--v5 with deprecated --unsigned alias rejects the same way", async () => {
+    const { stderr, exitCode } = await runCli(["tx.System.remark", "0xaa", "--v5", "--unsigned"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("--v4/--v5 and --general are mutually exclusive");
+  });
+
+  test("--v4 --v5 rejects", async () => {
+    const { stderr, exitCode } = await runCli([
+      "tx.System.remark",
+      "0xaa",
+      "--v4",
+      "--v5",
+      "--from",
+      "alice",
+      "--dry-run",
+    ]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("--v4 and --v5 are mutually exclusive");
+  });
+
+  test("--v5 without --from rejects", async () => {
+    const { stderr, exitCode } = await runCli(["tx.System.remark", "0xaa", "--v5"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("--v5 requires --from");
+  });
+
+  test("--v5 on a chain that cannot authorize it rejects with the capability error", async () => {
+    // The polkadot fixture has no VerifyMultiSignature extension; the gate
+    // must fire from cached metadata, before anything is signed or submitted.
+    const { stderr, exitCode } = await runCli([
+      "tx.System.remark",
+      "0xaa",
+      "--v5",
+      "--from",
+      "alice",
+      "--dry-run",
+    ]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("can't accept signed v5 transactions");
   });
 
   test("unknown pallet gives suggestion", async () => {
