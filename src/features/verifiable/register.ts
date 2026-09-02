@@ -43,7 +43,7 @@ ${BOLD}Options:${RESET}
   --file <path>         Read the message from a file (raw bytes)
   --stdin               Read the message from stdin
   --members <hex|file>  SCALE-encoded Vec<[u8;32]> ring (prove/verify)
-  --root <hex>          768-byte ring root / commitment (verify)
+  --root <hex>          288-byte ring root / commitment (verify)
   --proof <hex>         Ring-VRF proof bytes (verify)
   --signature <hex>     Bandersnatch signature (verify-sig)
   --member <hex>        32-byte member public key (verify-sig)
@@ -107,7 +107,7 @@ export function registerVerifiableCommands(cli: CAC) {
     .option("--file <path>", "Read message from a file (raw bytes)")
     .option("--stdin", "Read message from stdin")
     .option("--members <hex|file>", "SCALE-encoded Vec<[u8;32]> ring (prove/verify)")
-    .option("--root <hex>", "768-byte ring root/commitment (verify)")
+    .option("--root <hex>", "288-byte ring root/commitment (verify)")
     .option("--proof <hex>", "Ring-VRF proof bytes (verify)")
     .option("--signature <hex>", "Bandersnatch signature (verify-sig)")
     .option("--member <hex>", "32-byte member public key (verify-sig)")

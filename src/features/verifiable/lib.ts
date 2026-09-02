@@ -1,9 +1,9 @@
 import { blake2b } from "@noble/hashes/blake2.js";
 import { hexToBytes } from "@noble/hashes/utils.js";
-import { compact } from "@polkadot-api/substrate-bindings";
 import { mnemonicToEntropy } from "@polkadot-labs/hdkd-helpers";
 import {
   alias_in_context,
+  encode_members,
   member_from_entropy,
   members_root,
   one_shot,
@@ -147,7 +147,7 @@ export function ringProve(
 /**
  * Locally verify a ring-VRF proof, returning the recovered 32-byte alias or
  * throwing on failure. Pass either the SCALE-encoded `members` (`validate`) or
- * the 768-byte ring `commitment` / root as stored on chain
+ * the 288-byte ring `commitment` / root as stored on chain
  * (`validate_with_commitment` — the recommended pre-flight before submitting).
  */
 export function verifyRingProof(
@@ -166,19 +166,9 @@ export function verifyRingProof(
   throw new Error("verifyRingProof requires either `members` or `commitment`");
 }
 
-/** Compute the 768-byte ring root (MembersCommitment) from encoded members. */
+/** Compute the 288-byte ring root (MembersCommitment) from encoded members. */
 export function ringRoot(ringExp: RingExponent, members: Uint8Array): Uint8Array {
   return members_root(ringExp, members);
-}
-
-/**
- * SCALE compact-encode a non-negative integer. Used only as the length prefix
- * for the members vector. Delegates to the canonical scale-ts codec.
- */
-export function compactEncode(n: number): Uint8Array {
-  if (!Number.isInteger(n) || n < 0)
-    throw new Error("compactEncode: non-negative integer required");
-  return compact.enc(n);
 }
 
 /**
@@ -186,22 +176,12 @@ export function compactEncode(n: number): Uint8Array {
  * `validate`, and `members_root` decode. Layout: compact length prefix followed
  * by the raw 32-byte member keys concatenated in order (fixed-size arrays carry
  * no per-element prefix). Each member must be exactly 32 bytes.
+ *
+ * Delegates to verifiablejs `encode_members` (1.6.0+) so the encoding stays the
+ * exact inverse of the decoding those functions perform internally.
  */
 export function encodeMembers(members: Uint8Array[]): Uint8Array {
-  for (const m of members) {
-    if (m.length !== 32) {
-      throw new Error(`member key must be 32 bytes (got ${m.length})`);
-    }
-  }
-  const prefix = compactEncode(members.length);
-  const out = new Uint8Array(prefix.length + members.length * 32);
-  out.set(prefix, 0);
-  let offset = prefix.length;
-  for (const m of members) {
-    out.set(m, offset);
-    offset += 32;
-  }
-  return out;
+  return encode_members(members);
 }
 
 /**

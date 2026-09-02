@@ -47,7 +47,7 @@
     "@scure/sr25519": "^1.0.0",
     "cac": "^7.0.0",
     "polkadot-api": "^3.0.0",
-    "verifiablejs": "1.4.0",
+    "verifiablejs": "1.6.0",
     "yaml": "^2.9.0"
   },
   "devDependencies": {

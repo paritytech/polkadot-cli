@@ -2632,7 +2632,7 @@ dot verifiable verify --proof 0x… --context dotns --message 0x… --members 0x
 # verify / verify-sig exit non-zero if the proof / signature does not validate
 ```
 
-`prove` and `verify` accept the ring either as SCALE-encoded `--members` or as a 768-byte `--root` (commitment). `--members`/`--root`/`--proof` also accept a file path instead of inline hex.
+`prove` and `verify` accept the ring either as SCALE-encoded `--members` or as a 288-byte `--root` (commitment). `--members`/`--root`/`--proof` also accept a file path instead of inline hex.
 
 ### Saved member keys
 
