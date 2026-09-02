@@ -52,7 +52,7 @@ const NAMED_COMMANDS = [
   "which",
 ];
 
-const CHAIN_SUBCOMMANDS = ["add", "info", "list", "remove", "update"];
+const CHAIN_SUBCOMMANDS = ["add", "info", "list", "properties", "remove", "update"];
 const ACCOUNT_SUBCOMMANDS = [
   "add",
   "create",

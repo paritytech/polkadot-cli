@@ -95,6 +95,15 @@ dot chain add people --rpc "$RPC_PEOPLE" 2>/dev/null || true
 
 Scripts then use `dot people.query...` regardless of environment.
 
+**Prefer deriving `NATIVE_DECIMALS` over hardcoding it.** The `NATIVE_DECIMALS=12` / `NATIVE_DECIMALS=10` overrides above are a footgun: run a script against the wrong environment and every balance is off by orders of magnitude. Ask the chain instead:
+
+```bash
+NATIVE_DECIMALS=$(dot chain properties people --json | jq .tokenDecimals)
+# 10
+```
+
+`dot chain properties <name>` returns `{ tokenDecimals, tokenSymbol, ss58Format }` from the node (`system_properties`, falling back to `chainSpec_v1_properties`). Keep the env override only as a fallback for chains that expose no properties (the field comes back `null`).
+
 ## XCM Locations (JSON Arguments)
 
 Many pallets use XCM `Location` types as keys. These are JSON objects passed as a single arg:

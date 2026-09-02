@@ -17,6 +17,7 @@ import {
   type Config,
   DEFAULT_CONFIG,
 } from "../config/types.ts";
+import { fetchChainProperties } from "../core/chain-properties.ts";
 import { createChainClient, getParachainId } from "../core/client.ts";
 import { fetchMetadataFromChain } from "../core/metadata.ts";
 import {
@@ -45,6 +46,7 @@ ${BOLD}Usage:${RESET}
   $ dot chain update --all              Re-fetch metadata for all configured chains
   $ dot chain list                      List configured chains
   $ dot chain info <name>               Show details for a single chain
+  $ dot chain properties <name>         Show token decimals/symbol and ss58 prefix
   $ dot chain <name>                    Shortcut for \`chain info <name>\`
   $ dot chain export [names...]         Export chain configuration to stdout
   $ dot chain import <file>             Import chain configuration from a file
@@ -58,6 +60,8 @@ ${BOLD}Examples:${RESET}
   $ dot chains -v
   $ dot chain info polkadot
   $ dot chain polkadot
+  $ dot chain properties polkadot
+  $ dot chain properties polkadot --json
   $ dot chain update kusama
   $ dot chain update --all
   $ dot chain remove kusama
@@ -117,6 +121,8 @@ export function registerChainCommands(cli: CAC) {
             return chainList(opts);
           case "info":
             return chainInfo(names[0], opts);
+          case "properties":
+            return chainProperties(names[0], opts);
           case "update":
             return chainUpdate(names[0], opts);
           case "export":
@@ -449,6 +455,39 @@ async function chainInfo(name: string | undefined, opts: { output?: string; json
   } else {
     console.log(`    ${DIM}not cached — run \`dot chain update ${resolved}\`${RESET}`);
   }
+}
+
+async function chainProperties(
+  name: string | undefined,
+  opts: { rpc?: string | string[]; output?: string; json?: boolean } = {},
+) {
+  if (!name) {
+    console.error("Usage: dot chain properties <name>");
+    process.exit(1);
+  }
+
+  const config = await loadConfig();
+  const { name: resolved, chain } = resolveChain(config, name);
+  const rpcUrl = opts.rpc ?? chain.rpc;
+
+  process.stderr.write(`Fetching properties for ${resolved}...\n`);
+  const { properties } = await fetchChainProperties(rpcUrl);
+
+  if (isJsonOutput(opts)) {
+    console.log(formatJson(properties));
+    return;
+  }
+
+  printHeading(resolved);
+  printProperty("token decimals", properties.tokenDecimals);
+  printProperty("token symbol", properties.tokenSymbol);
+  printProperty("ss58 format", properties.ss58Format);
+}
+
+function printProperty(label: string, value: unknown) {
+  const rendered =
+    value == null ? `${DIM}—${RESET}` : Array.isArray(value) ? value.join(", ") : String(value);
+  console.log(`  ${CYAN}${label}:${RESET} ${rendered}`);
 }
 
 function countByFamily(methods: string[]): Record<string, number> {
