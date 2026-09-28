@@ -30,6 +30,7 @@ import {
   runExternalCommand,
 } from "./core/external-command.ts";
 import { isFilePath, loadCommandFile, parseVarFlags } from "./core/file-loader.ts";
+import { isJsonOutput, writeStdout } from "./core/output.ts";
 import {
   getUpdateNotification,
   startBackgroundCheck,
@@ -476,8 +477,26 @@ if (process.argv[2] === "__complete") {
     process.exit(code);
   }
 
+  // `cli.options` is only filled once `cli.parse()` succeeded, so also look at raw
+  // argv to keep `--json` working for errors thrown while parsing.
+  function jsonErrorsRequested(): boolean {
+    if (isJsonOutput(cli.options as { json?: boolean; output?: string })) return true;
+    const end = process.argv.indexOf("--");
+    const argv = end === -1 ? process.argv : process.argv.slice(0, end);
+    return argv.includes("--json") || readRawOptionValue("output", argv) === "json";
+  }
+
+  function errorMessage(err: unknown): string {
+    if (err instanceof CliError) return err.message;
+    if (err instanceof Error) return formatRuntimeError(err);
+    return `An unexpected error occurred: ${String(err)}`;
+  }
+
   async function handleError(err: unknown): Promise<never> {
-    if (err instanceof CliError) {
+    if (jsonErrorsRequested()) {
+      // --json contract: everything goes to stdout as JSON, exit code stays non-zero
+      await writeStdout(`${JSON.stringify({ error: errorMessage(err) })}\n`);
+    } else if (err instanceof CliError) {
       console.error(`Error: ${err.message}`);
     } else if (err instanceof Error) {
       // CACError for missing args, polkadot-api errors, etc.
@@ -493,7 +512,11 @@ if (process.argv[2] === "__complete") {
   // otherwise crash the process (e.g. after `dot chain update --all`).
   process.on("unhandledRejection", (reason) => {
     if (isPapiCleanupError(reason)) return;
-    console.error(`Error: ${formatRuntimeError(reason)}`);
+    if (jsonErrorsRequested()) {
+      console.log(JSON.stringify({ error: formatRuntimeError(reason) }));
+    } else {
+      console.error(`Error: ${formatRuntimeError(reason)}`);
+    }
     process.exit(1);
   });
 
