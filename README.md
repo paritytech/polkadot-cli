@@ -2360,7 +2360,7 @@ dot polkadot.tx.System.remark 0xdeadbeef --from alice   # simulated, not submitt
 
 ### `DOT_OUTPUT` — make JSON the default output
 
-Set `DOT_OUTPUT=json` to make every command behave as if `--json` had been passed: results **and errors** are printed as JSON on stdout, and failures still exit non-zero. Handy for scripts and agents that always parse output:
+Set `DOT_OUTPUT=json` to make every command behave as if `--json` had been passed: results **and errors** are printed as JSON on stdout, and failures still exit non-zero. Handy for scripts and agents that always parse output. (Help screens, e.g. `dot chain` with no action, stay plain text, as they do with `--json`.)
 
 ```bash
 export DOT_OUTPUT=json
@@ -2370,7 +2370,9 @@ dot chain add                             # {"error":"Chain name is required.","
 echo $?                                   # 1
 ```
 
-**Precedence:** `--json` and an explicit `--output <format>` always win, so `--output pretty` gives human-readable output for a single command even when `DOT_OUTPUT=json` is set. Accepted values are `json` and `pretty` (case-insensitive); anything else means pretty.
+**Precedence:** `--json` and an explicit `--output <format>` always win, so `--output pretty` gives human-readable output for a single command even when `DOT_OUTPUT=json` is set. `DOT_OUTPUT` accepts `json` or `pretty` (case-insensitive); any other value means pretty.
+
+The variable is inherited by [plugins](#plugins) like any other environment variable, so a `dot-<name>` plugin that calls `$DOT_BIN` will get JSON from it too.
 
 ### `DOT_TRUST_CACHED_METADATA` — skip the staleness check
 

@@ -521,13 +521,13 @@ if (process.argv[2] === "__complete") {
   // otherwise crash the process (e.g. after `dot chain update --all`).
   process.on("unhandledRejection", (reason) => {
     if (isPapiCleanupError(reason)) return;
+    // Stays synchronous: an async write would let main() reach a later exit(0)
+    // before this one fires. The payload is a single short line, so it can't truncate.
     if (jsonErrorsRequested()) {
-      void writeStdout(`${JSON.stringify({ error: formatRuntimeError(reason) })}\n`).then(() =>
-        process.exit(1),
-      );
-      return;
+      console.log(JSON.stringify({ error: formatRuntimeError(reason) }));
+    } else {
+      console.error(`Error: ${formatRuntimeError(reason)}`);
     }
-    console.error(`Error: ${formatRuntimeError(reason)}`);
     process.exit(1);
   });
 

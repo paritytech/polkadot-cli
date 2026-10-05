@@ -69,6 +69,32 @@ describe("subcommand errors honour --json", { timeout: 15_000 }, () => {
     expect(stderr).toContain("Usage: dot chain add <name> --rpc <url>");
   });
 
+  test("multi-line usage is newline-joined in the usage field", async () => {
+    const { stdout, exitCode } = await runCli(["account", "inspect", "--json"]);
+    expect(exitCode).toBe(1);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.error).toBe("Input is required.");
+    expect(parsed.usage.split("\n")).toHaveLength(3);
+  });
+
+  test("unknown chain action gets a one-line plain usage", async () => {
+    const { stdout, exitCode } = await runCli(["chain", "bogus", "--json"]);
+    expect(exitCode).toBe(1);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.error).toBe('Unknown action "bogus".');
+    expect(parsed.usage).not.toContain("\n");
+    expect(parsed.usage).not.toContain("\x1b");
+  });
+
+  test("--json after the -- terminator does not switch errors to JSON", async () => {
+    const { stdout, stderr, exitCode } = await runCli(["query.System.Number", "--", "--json"], {
+      noDefaultChain: true,
+    });
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toContain("Error:");
+  });
+
   test("unknown completions shell", async () => {
     const { stdout, exitCode } = await runCli(["completions", "tcsh", "--json"]);
     expect(exitCode).toBe(1);

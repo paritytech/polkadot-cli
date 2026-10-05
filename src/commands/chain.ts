@@ -129,7 +129,10 @@ export function registerChainCommands(cli: CAC) {
             if (findChainName(config, action)) {
               return chainInfo(action, opts);
             }
-            throw new UsageError(`Unknown action "${action}".`, CHAIN_HELP);
+            throw new UsageError(
+              `Unknown action "${action}".`,
+              "Usage: dot chain <add|remove|update|list|info|export|import> [name] (see dot chain --help)",
+            );
           }
         }
       },
@@ -494,6 +497,7 @@ async function chainUpdateAll(config: {
   const chainNames = Object.keys(config.chains).sort();
   const failed = await updateChainsMetadata(config, chainNames);
   if (failed > 0) {
+    console.error();
     throw new CliError(`${failed} of ${chainNames.length} chains failed to update.`);
   }
 }
