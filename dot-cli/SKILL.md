@@ -211,6 +211,8 @@ DOT_DRY_RUN=1 dot polkadot.tx.System.remark 0xdeadbeef --from alice
 
 Precedence: an explicit flag wins — `--dry-run` forces dry-run, `--no-dry-run` forces a real submission even with `DOT_DRY_RUN=1`. Decode-only paths (`--encode`, `--to-yaml`, `--to-json`) are unaffected.
 
+**JSON by default.** Set `DOT_OUTPUT=json` to make every command behave as if `--json` was passed — results and errors are JSON on stdout, failures still exit non-zero. `--output pretty` overrides it for one command.
+
 ### Encoding Calls (for Sudo, XCM, Batch)
 
 `--encode` returns raw call hex without signing — use for wrapping:
@@ -728,7 +730,7 @@ dot verifiable verify --proof 0x<proof> --context dotns \
 
 | Flag | Scope | Purpose |
 |------|-------|---------|
-| `--json` | all | JSON output (but `undefined` and errors may not be JSON) |
+| `--json` | all | JSON output. Errors become `{"error": "...", "usage"?: "..."}` on stdout and still exit non-zero. Missing storage values still print the literal `undefined` |
 | `--from <name>` | tx | Account to sign with |
 | `--encode` | tx | Encode to hex, don't sign or submit |
 | `--dry-run` / `--no-dry-run` | tx | Force / forbid dry-run (overrides `DOT_DRY_RUN`) |

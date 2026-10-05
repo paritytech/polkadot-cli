@@ -5,6 +5,21 @@ export class CliError extends Error {
   }
 }
 
+/**
+ * A CLI error caused by missing or invalid input, carrying the usage hint to
+ * show alongside it. Kept separate from the message so `--json` can emit the
+ * usage as its own field instead of baking it into `error`.
+ */
+export class UsageError extends CliError {
+  constructor(
+    message: string,
+    readonly usage: string,
+  ) {
+    super(message);
+    this.name = "UsageError";
+  }
+}
+
 export class ConnectionError extends CliError {
   constructor(message: string) {
     super(message);

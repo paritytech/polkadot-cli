@@ -46,8 +46,20 @@ export function printResult(data: unknown, format: string = "pretty"): void {
   }
 }
 
-export function isJsonOutput(opts: { json?: boolean; output?: string }): boolean {
-  return opts.json === true || opts.output === "json";
+/**
+ * Whether JSON output is requested. Precedence (highest first):
+ *   1. `--json`
+ *   2. An explicit `--output <format>` (so `--output pretty` overrides the env var)
+ *   3. The `DOT_OUTPUT` environment variable (`json` or `pretty`, case-insensitive)
+ *   4. Pretty
+ */
+export function isJsonOutput(
+  opts: { json?: boolean; output?: string },
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  if (opts.json === true) return true;
+  if (opts.output !== undefined) return opts.output === "json";
+  return env.DOT_OUTPUT?.trim().toLowerCase() === "json";
 }
 
 // Awaitable write to process.stdout — multi-MB output via console.log gets

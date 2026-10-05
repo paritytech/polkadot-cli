@@ -36,6 +36,7 @@ import {
 import { fetchRpcMethods } from "../core/rpc.ts";
 import { inferFamily, RPC_REGISTRY } from "../data/rpc-registry.ts";
 import { withHelp } from "../platform/cli.ts";
+import { CliError, UsageError } from "../utils/errors.ts";
 
 const CHAIN_HELP = `
 ${BOLD}Usage:${RESET}
@@ -128,9 +129,7 @@ export function registerChainCommands(cli: CAC) {
             if (findChainName(config, action)) {
               return chainInfo(action, opts);
             }
-            console.error(`Unknown action "${action}".\n`);
-            console.log(CHAIN_HELP);
-            process.exit(1);
+            throw new UsageError(`Unknown action "${action}".`, CHAIN_HELP);
           }
         }
       },
@@ -169,21 +168,18 @@ async function chainAdd(
   },
 ) {
   if (!name) {
-    console.error("Chain name is required.\n");
-    console.error("Usage: dot chain add <name> --rpc <url>");
-    process.exit(1);
+    throw new UsageError("Chain name is required.", "Usage: dot chain add <name> --rpc <url>");
   }
   if (!opts.rpc) {
-    console.error("Must provide --rpc <url>.\n");
-    console.error("Usage: dot chain add <name> --rpc <url>");
-    process.exit(1);
+    throw new UsageError("Must provide --rpc <url>.", "Usage: dot chain add <name> --rpc <url>");
   }
 
   const parachainIdRaw = opts.parachainId != null ? Number(opts.parachainId) : undefined;
   if (parachainIdRaw != null && !opts.relay) {
-    console.error("Cannot set --parachain-id without --relay.\n");
-    console.error("Usage: dot chain add <name> --rpc <url> --relay <relay> --parachain-id <id>");
-    process.exit(1);
+    throw new UsageError(
+      "Cannot set --parachain-id without --relay.",
+      "Usage: dot chain add <name> --rpc <url> --relay <relay> --parachain-id <id>",
+    );
   }
 
   const chainConfig: ChainConfig = { rpc: opts.rpc };
@@ -246,8 +242,7 @@ async function chainRemove(
   opts: { output?: string; json?: boolean } = {},
 ) {
   if (!name) {
-    console.error("Usage: dot chain remove <name>");
-    process.exit(1);
+    throw new UsageError("Chain name is required.", "Usage: dot chain remove <name>");
   }
 
   const config = await loadConfig();
@@ -365,8 +360,7 @@ function printChainLine(
 
 async function chainInfo(name: string | undefined, opts: { output?: string; json?: boolean } = {}) {
   if (!name) {
-    console.error("Usage: dot chain info <name>");
-    process.exit(1);
+    throw new UsageError("Chain name is required.", "Usage: dot chain info <name>");
   }
 
   const config = await loadConfig();
@@ -472,8 +466,7 @@ async function chainUpdate(
   }
 
   if (!name) {
-    console.error("Usage: dot chain update <name> | --all");
-    process.exit(1);
+    throw new UsageError("Chain name is required.", "Usage: dot chain update <name> | --all");
   }
 
   const { name: chainName, chain: chainConfig } = resolveChain(config, name);
@@ -501,8 +494,7 @@ async function chainUpdateAll(config: {
   const chainNames = Object.keys(config.chains).sort();
   const failed = await updateChainsMetadata(config, chainNames);
   if (failed > 0) {
-    console.error(`\n${failed} of ${chainNames.length} chains failed to update.`);
-    process.exit(1);
+    throw new CliError(`${failed} of ${chainNames.length} chains failed to update.`);
   }
 }
 

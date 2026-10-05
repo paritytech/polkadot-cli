@@ -1,5 +1,6 @@
 import type { CAC } from "cac";
 import { withHelp } from "../platform/cli.ts";
+import { CliError } from "../utils/errors.ts";
 
 const ZSH_SCRIPT = `\
 _dot_completions() {
@@ -85,10 +86,9 @@ export function registerCompletionsCommand(cli: CAC) {
     .action((shell: string) => {
       const script = SCRIPTS[shell];
       if (!script) {
-        console.error(
+        throw new CliError(
           `Unsupported shell "${shell}". Supported: ${Object.keys(SCRIPTS).join(", ")}`,
         );
-        process.exit(1);
       }
 
       // Print setup instructions to stderr so they don't pollute the script,

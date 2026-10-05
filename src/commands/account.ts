@@ -50,6 +50,7 @@ import {
   type SovereignAccountType,
 } from "../core/parachain.ts";
 import { withHelp } from "../platform/cli.ts";
+import { CliError, UsageError } from "../utils/errors.ts";
 
 const ACCOUNT_HELP = `
 ${BOLD}Usage:${RESET}
@@ -209,9 +210,7 @@ async function accountCreate(
   opts: { path?: string; output?: string; json?: boolean },
 ) {
   if (!name) {
-    console.error("Account name is required.\n");
-    console.error("Usage: dot account create <name>");
-    process.exit(1);
+    throw new UsageError("Account name is required.", "Usage: dot account create <name>");
   }
 
   if (isDevAccount(name)) {
@@ -279,21 +278,21 @@ async function accountImport(
   opts: { secret?: string; env?: string; path?: string; output?: string; json?: boolean },
 ) {
   if (!name) {
-    console.error("Account name is required.\n");
-    console.error('Usage: dot account import <name> --secret "mnemonic or hex seed"');
-    process.exit(1);
+    throw new UsageError(
+      "Account name is required.",
+      'Usage: dot account import <name> --secret "mnemonic or hex seed"',
+    );
   }
 
   if (opts.secret && opts.env) {
-    console.error("Use --secret or --env, not both.\n");
-    process.exit(1);
+    throw new CliError("Use --secret or --env, not both.");
   }
 
   if (!opts.secret && !opts.env) {
-    console.error("--secret or --env is required.\n");
-    console.error('Usage: dot account import <name> --secret "mnemonic or hex seed"');
-    console.error("       dot account import <name> --env <VAR>");
-    process.exit(1);
+    throw new UsageError(
+      "--secret or --env is required.",
+      'Usage: dot account import <name> --secret "mnemonic or hex seed"\n       dot account import <name> --env <VAR>',
+    );
   }
 
   if (isDevAccount(name)) {
@@ -378,9 +377,10 @@ async function accountAddWatchOnly(
   } = {},
 ) {
   if (!name) {
-    console.error("Account name is required.\n");
-    console.error("Usage: dot account add <name> <ss58-address|0x-public-key>");
-    process.exit(1);
+    throw new UsageError(
+      "Account name is required.",
+      "Usage: dot account add <name> <ss58-address|0x-public-key>",
+    );
   }
 
   const sovereignSource = resolveSovereignSource(opts);
@@ -392,13 +392,14 @@ async function accountAddWatchOnly(
   }
 
   if (!sovereignSource && !address) {
-    console.error("Address is required.\n");
-    console.error("Usage: dot account add <name> <ss58-address|0x-public-key>");
-    console.error(
-      "       dot account add <name> --parachain <id> --parachain-type <child|sibling>",
+    throw new UsageError(
+      "Address is required.",
+      [
+        "Usage: dot account add <name> <ss58-address|0x-public-key>",
+        "       dot account add <name> --parachain <id> --parachain-type <child|sibling>",
+        "       dot account add <name> --pallet-id <8 chars or 0x hex>",
+      ].join("\n"),
     );
-    console.error("       dot account add <name> --pallet-id <8 chars or 0x hex>");
-    process.exit(1);
   }
 
   if (isDevAccount(name)) {
@@ -550,27 +551,23 @@ function resolveSovereignSource(opts: {
   return undefined;
 }
 
+const DERIVE_USAGE = "Usage: dot account derive <source> <new-name> --path <derivation>";
+
 async function accountDerive(
   sourceName: string | undefined,
   newName: string | undefined,
   opts: { path?: string; output?: string; json?: boolean },
 ) {
   if (!sourceName) {
-    console.error("Source account name is required.\n");
-    console.error("Usage: dot account derive <source> <new-name> --path <derivation>");
-    process.exit(1);
+    throw new UsageError("Source account name is required.", DERIVE_USAGE);
   }
 
   if (!newName) {
-    console.error("New account name is required.\n");
-    console.error("Usage: dot account derive <source> <new-name> --path <derivation>");
-    process.exit(1);
+    throw new UsageError("New account name is required.", DERIVE_USAGE);
   }
 
   if (!opts.path) {
-    console.error("--path is required for derive.\n");
-    console.error("Usage: dot account derive <source> <new-name> --path <derivation>");
-    process.exit(1);
+    throw new UsageError("--path is required for derive.", DERIVE_USAGE);
   }
 
   if (isDevAccount(newName)) {
@@ -824,9 +821,10 @@ async function accountList(opts: { output?: string; json?: boolean } = {}) {
 
 async function accountRemove(names: string[], opts: { output?: string; json?: boolean } = {}) {
   if (names.length === 0) {
-    console.error("At least one account name is required.\n");
-    console.error("Usage: dot account remove <name> [name2] ...");
-    process.exit(1);
+    throw new UsageError(
+      "At least one account name is required.",
+      "Usage: dot account remove <name> [name2] ...",
+    );
   }
 
   // Validate all names upfront before deleting anything
@@ -898,19 +896,19 @@ async function accountInspect(
   }
 
   if (!sovereignSource && !input) {
-    console.error("Input is required.\n");
-    console.error("Usage: dot account inspect <name|ss58-address|0x-public-key> [--prefix <N>]");
-    console.error("       dot account inspect --pallet-id <id> [--prefix <N>]");
-    console.error(
-      "       dot account inspect --parachain <id> --parachain-type <child|sibling> [--prefix <N>]",
+    throw new UsageError(
+      "Input is required.",
+      [
+        "Usage: dot account inspect <name|ss58-address|0x-public-key> [--prefix <N>]",
+        "       dot account inspect --pallet-id <id> [--prefix <N>]",
+        "       dot account inspect --parachain <id> --parachain-type <child|sibling> [--prefix <N>]",
+      ].join("\n"),
     );
-    process.exit(1);
   }
 
   const prefix = opts.prefix != null ? Number(opts.prefix) : 42;
   if (Number.isNaN(prefix) || prefix < 0) {
-    console.error(`Invalid prefix "${opts.prefix}". Must be a non-negative integer.`);
-    process.exit(1);
+    throw new CliError(`Invalid prefix "${opts.prefix}". Must be a non-negative integer.`);
   }
 
   let name: string | undefined;
@@ -968,16 +966,14 @@ async function accountInspect(
       } else if (account.secret !== undefined && isEnvSecret(account.secret)) {
         const derived = tryDerivePublicKey(account.secret.env, account.derivationPath);
         if (!derived) {
-          console.error(
+          throw new CliError(
             `Cannot derive public key for "${account.name}": $${account.secret.env} is not set.`,
           );
-          process.exit(1);
         }
         publicKeyHex = derived;
       } else {
         // Should not happen for well-formed accounts
-        console.error(`Account "${account.name}" has no public key.`);
-        process.exit(1);
+        throw new CliError(`Account "${account.name}" has no public key.`);
       }
     }
     // 3. Hex public key
@@ -996,10 +992,9 @@ async function accountInspect(
         const decoded = fromSs58(input!);
         publicKeyHex = publicKeyToHex(decoded);
       } catch {
-        console.error(
+        throw new CliError(
           `Cannot identify "${input}" as an account name, SS58 address, hex public key, or H160.`,
         );
-        process.exit(1);
       }
     }
   }
@@ -1015,20 +1010,17 @@ async function accountInspect(
   let revealedSecret: { label: string; field: string; value: string } | undefined;
   if (opts.showSecret) {
     if (!name) {
-      console.error(
+      throw new CliError(
         "--show-secret requires an account name; raw addresses and hex keys have no secret to reveal.",
       );
-      process.exit(1);
     }
     if (!hasSecret) {
-      console.error(`Account "${name}" is watch-only (no secret). Cannot reveal private key.`);
-      process.exit(1);
+      throw new CliError(`Account "${name}" is watch-only (no secret). Cannot reveal private key.`);
     }
     try {
       privateKeyHex = bytesToHex(await resolveAccountExpandedSecret(input!));
     } catch (err) {
-      console.error((err as Error).message);
-      process.exit(1);
+      throw new CliError((err as Error).message);
     }
     if (storedAccount?.secret !== undefined && !isEnvSecret(storedAccount.secret)) {
       const kind = secretKind(storedAccount.secret);

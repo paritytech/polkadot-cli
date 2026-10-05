@@ -42,7 +42,7 @@ import {
   readRawOptionValue,
   registerGlobalOptions,
 } from "./platform/cli.ts";
-import { CliError, formatRuntimeError, isPapiCleanupError } from "./utils/errors.ts";
+import { CliError, formatRuntimeError, isPapiCleanupError, UsageError } from "./utils/errors.ts";
 import { parseDotPath } from "./utils/parse-dot-path.ts";
 
 // Early exit for shell completion — avoid loading update checker or heavy imports
@@ -465,7 +465,9 @@ if (process.argv[2] === "__complete") {
     console.log("  --chain <name>     Target chain (required)");
     console.log("  --rpc <url>        Override RPC endpoint");
     console.log("  --json             Output as JSON");
-    console.log("  --output <format>  Output format: pretty or json");
+    console.log(
+      "  --output <format>  Output format: pretty or json (default: $DOT_OUTPUT or pretty)",
+    );
     console.log("  --help, -h         Display this message");
     console.log("  --version          Show version");
   }
@@ -480,10 +482,13 @@ if (process.argv[2] === "__complete") {
   // `cli.options` is only filled once `cli.parse()` succeeded, so also look at raw
   // argv to keep `--json` working for errors thrown while parsing.
   function jsonErrorsRequested(): boolean {
-    if (isJsonOutput(cli.options as { json?: boolean; output?: string })) return true;
     const end = process.argv.indexOf("--");
     const argv = end === -1 ? process.argv : process.argv.slice(0, end);
-    return argv.includes("--json") || readRawOptionValue("output", argv) === "json";
+    const opts = cli.options as { json?: boolean; output?: string };
+    return isJsonOutput({
+      json: opts.json === true || argv.includes("--json"),
+      output: opts.output ?? readRawOptionValue("output", argv),
+    });
   }
 
   function errorMessage(err: unknown): string {
@@ -495,7 +500,11 @@ if (process.argv[2] === "__complete") {
   async function handleError(err: unknown): Promise<never> {
     if (jsonErrorsRequested()) {
       // --json contract: everything goes to stdout as JSON, exit code stays non-zero
-      await writeStdout(`${JSON.stringify({ error: errorMessage(err) })}\n`);
+      const payload: { error: string; usage?: string } = { error: errorMessage(err) };
+      if (err instanceof UsageError) payload.usage = err.usage;
+      await writeStdout(`${JSON.stringify(payload)}\n`);
+    } else if (err instanceof UsageError) {
+      console.error(`Error: ${err.message}\n\n${err.usage}`);
     } else if (err instanceof CliError) {
       console.error(`Error: ${err.message}`);
     } else if (err instanceof Error) {
@@ -513,10 +522,12 @@ if (process.argv[2] === "__complete") {
   process.on("unhandledRejection", (reason) => {
     if (isPapiCleanupError(reason)) return;
     if (jsonErrorsRequested()) {
-      console.log(JSON.stringify({ error: formatRuntimeError(reason) }));
-    } else {
-      console.error(`Error: ${formatRuntimeError(reason)}`);
+      void writeStdout(`${JSON.stringify({ error: formatRuntimeError(reason) })}\n`).then(() =>
+        process.exit(1),
+      );
+      return;
     }
+    console.error(`Error: ${formatRuntimeError(reason)}`);
     process.exit(1);
   });
 
