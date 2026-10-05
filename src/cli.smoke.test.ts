@@ -48,7 +48,7 @@ async function runBuilt(
   writeFileSync(join(dotDir, "config.json"), JSON.stringify(DEFAULT_CONFIG));
   try {
     const proc = Bun.spawn(["node", BUNDLE, ...args], {
-      env: { ...process.env, HOME: tmpHome, DOT_HOME: dotDir, ...extraEnv },
+      env: { ...process.env, HOME: tmpHome, DOT_HOME: dotDir, DOT_OUTPUT: "", ...extraEnv },
       cwd: tmpHome,
       stdout: "pipe",
       stderr: "pipe",
@@ -152,5 +152,38 @@ describe("built bundle: unknown command and plugin dispatch (node)", { timeout: 
     expect(stdout).toContain("plugin-ran args=[vote 312 --json]");
     expect(stdout).toMatch(/DOT_BIN=\S+/);
     expect(exitCode).toBe(7);
+  });
+});
+
+// UsageError is thrown from command modules but inspected in cli.ts; if the
+// bundle duplicates utils/errors.ts, an `instanceof` check silently drops the
+// usage field. Only the built bundle can show that.
+// @ts-expect-error Bun supports describe(label, options, fn) at runtime
+describe("built bundle: JSON errors (node)", { timeout: 60_000 }, () => {
+  beforeAll(build);
+  afterAll(() => rmSync(BUNDLE, { force: true }));
+
+  test("usage errors keep the usage field under --json", async () => {
+    const { stdout, exitCode } = await runBuilt(["chain", "add", "--json"]);
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout)).toEqual({
+      error: "Chain name is required.",
+      usage: "Usage: dot chain add <name> --rpc <url>",
+    });
+  });
+
+  test("usage errors print the usage in text mode", async () => {
+    const { stderr, exitCode } = await runBuilt(["chain", "add"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("Error: Chain name is required.");
+    expect(stderr).toContain("Usage: dot chain add <name> --rpc <url>");
+  });
+
+  test("DOT_OUTPUT=json turns errors into JSON without a flag", async () => {
+    const { stdout, exitCode } = await runBuilt(["account", "inspect", "nosuch"], {
+      DOT_OUTPUT: "json",
+    });
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout).error).toContain('Cannot identify "nosuch"');
   });
 });

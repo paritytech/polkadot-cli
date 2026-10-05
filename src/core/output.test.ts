@@ -128,7 +128,7 @@ describe("isJsonOutput", () => {
   });
 
   test("returns false for no flags", () => {
-    expect(isJsonOutput({})).toBe(false);
+    expect(isJsonOutput({}, {})).toBe(false);
   });
 
   test("returns false for non-json output", () => {
@@ -136,7 +136,27 @@ describe("isJsonOutput", () => {
   });
 
   test("returns false when json is false", () => {
-    expect(isJsonOutput({ json: false })).toBe(false);
+    expect(isJsonOutput({ json: false }, {})).toBe(false);
+  });
+
+  test("DOT_OUTPUT=json enables JSON when no flag is given", () => {
+    expect(isJsonOutput({}, { DOT_OUTPUT: "json" })).toBe(true);
+    expect(isJsonOutput({}, { DOT_OUTPUT: " JSON " })).toBe(true);
+  });
+
+  test("DOT_OUTPUT=pretty or an unknown value stays pretty", () => {
+    expect(isJsonOutput({}, { DOT_OUTPUT: "pretty" })).toBe(false);
+    expect(isJsonOutput({}, { DOT_OUTPUT: "yaml" })).toBe(false);
+    expect(isJsonOutput({}, { DOT_OUTPUT: "" })).toBe(false);
+  });
+
+  test("an explicit --output overrides DOT_OUTPUT", () => {
+    expect(isJsonOutput({ output: "pretty" }, { DOT_OUTPUT: "json" })).toBe(false);
+    expect(isJsonOutput({ output: "json" }, { DOT_OUTPUT: "pretty" })).toBe(true);
+  });
+
+  test("--json wins over DOT_OUTPUT=pretty", () => {
+    expect(isJsonOutput({ json: true }, { DOT_OUTPUT: "pretty" })).toBe(true);
   });
 });
 

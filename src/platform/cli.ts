@@ -49,9 +49,9 @@ export function printMatchedCommandHelp(cli: CAC): boolean {
 export function registerGlobalOptions(cli: CAC): void {
   cli.option("--chain <name>", "Target chain (required)");
   cli.option("--rpc <url>", "Override RPC endpoint for this call");
-  cli.option("--output <format>", "Output format: pretty or json", {
-    default: "pretty",
-  });
+  // No default: an absent --output must stay distinguishable from an explicit
+  // `--output pretty` so the DOT_OUTPUT env var can supply the default.
+  cli.option("--output <format>", "Output format: pretty or json (default: $DOT_OUTPUT or pretty)");
   cli.option("--json", "Output as JSON (shorthand for --output json)");
 }
 

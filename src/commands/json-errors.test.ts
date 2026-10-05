@@ -41,3 +41,93 @@ describe("errors honour --json", { timeout: 15_000 }, () => {
     expect(stderr).toContain("Error: No chain specified");
   });
 });
+
+// Subcommand validation errors used to print to stderr and exit directly,
+// bypassing the --json handler. They now throw, so they honour it too.
+// @ts-expect-error Bun supports describe(label, options, fn) at runtime
+describe("subcommand errors honour --json", { timeout: 15_000 }, () => {
+  test("account inspect with unparseable input", async () => {
+    const { stdout, stderr, exitCode } = await runCli(["account", "inspect", "nosuch", "--json"]);
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout).error).toContain('Cannot identify "nosuch"');
+    expect(stderr).toBe("");
+  });
+
+  test("usage errors carry the usage hint as a separate field", async () => {
+    const { stdout, exitCode } = await runCli(["chain", "add", "--json"]);
+    expect(exitCode).toBe(1);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.error).toBe("Chain name is required.");
+    expect(parsed.usage).toBe("Usage: dot chain add <name> --rpc <url>");
+  });
+
+  test("usage errors in text mode print the message and the usage on stderr", async () => {
+    const { stdout, stderr, exitCode } = await runCli(["chain", "add"]);
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toContain("Error: Chain name is required.");
+    expect(stderr).toContain("Usage: dot chain add <name> --rpc <url>");
+  });
+
+  test("multi-line usage is newline-joined in the usage field", async () => {
+    const { stdout, exitCode } = await runCli(["account", "inspect", "--json"]);
+    expect(exitCode).toBe(1);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.error).toBe("Input is required.");
+    expect(parsed.usage.split("\n")).toHaveLength(3);
+  });
+
+  test("unknown chain action gets a one-line plain usage", async () => {
+    const { stdout, exitCode } = await runCli(["chain", "bogus", "--json"]);
+    expect(exitCode).toBe(1);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.error).toBe('Unknown action "bogus".');
+    expect(parsed.usage).not.toContain("\n");
+    expect(parsed.usage).not.toContain("\x1b");
+  });
+
+  test("--json after the -- terminator does not switch errors to JSON", async () => {
+    const { stdout, stderr, exitCode } = await runCli(["query.System.Number", "--", "--json"], {
+      noDefaultChain: true,
+    });
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toContain("Error:");
+  });
+
+  test("unknown completions shell", async () => {
+    const { stdout, exitCode } = await runCli(["completions", "tcsh", "--json"]);
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout).error).toContain('Unsupported shell "tcsh"');
+  });
+});
+
+// @ts-expect-error Bun supports describe(label, options, fn) at runtime
+describe("DOT_OUTPUT env var", { timeout: 15_000 }, () => {
+  test("DOT_OUTPUT=json switches results to JSON without a flag", async () => {
+    const { stdout, exitCode } = await runCli(["account", "inspect", "alice"], {
+      env: { DOT_OUTPUT: "json" },
+    });
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout).ss58).toBe("5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY");
+  });
+
+  test("DOT_OUTPUT=json switches errors to JSON without a flag", async () => {
+    const { stdout, exitCode } = await runCli(["query.System.Number"], {
+      noDefaultChain: true,
+      env: { DOT_OUTPUT: "json" },
+    });
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout).error).toContain("No chain specified");
+  });
+
+  test("--output pretty overrides DOT_OUTPUT=json", async () => {
+    const { stdout, stderr, exitCode } = await runCli(
+      ["query.System.Number", "--output", "pretty"],
+      { noDefaultChain: true, env: { DOT_OUTPUT: "json" } },
+    );
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toContain("Error: No chain specified");
+  });
+});

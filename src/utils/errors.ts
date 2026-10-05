@@ -5,6 +5,33 @@ export class CliError extends Error {
   }
 }
 
+/**
+ * A CLI error caused by missing or invalid input, carrying the usage hint to
+ * show alongside it. Kept separate from the message so `--json` can emit the
+ * usage as its own field instead of baking it into `error`.
+ */
+export class UsageError extends CliError {
+  constructor(
+    message: string,
+    readonly usage: string,
+  ) {
+    super(message);
+    this.name = "UsageError";
+  }
+}
+
+/**
+ * The usage hint of a `UsageError`, or undefined. Checks the name rather than
+ * `instanceof`: `bun build` can duplicate this module in the bundle, so an error
+ * thrown from one copy is not an instance of the other copy's class (the same
+ * trap as #238).
+ */
+export function usageOf(err: unknown): string | undefined {
+  if (!(err instanceof Error) || err.name !== "UsageError") return undefined;
+  const usage = (err as { usage?: unknown }).usage;
+  return typeof usage === "string" ? usage : undefined;
+}
+
 export class ConnectionError extends CliError {
   constructor(message: string) {
     super(message);

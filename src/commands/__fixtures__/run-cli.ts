@@ -133,7 +133,9 @@ export async function runCli(
 
   try {
     const spawnOpts: Parameters<typeof Bun.spawn>[1] = {
-      env: { ...process.env, HOME: tmpHome, DOT_HOME: dotDir, ...options?.env },
+      // DOT_OUTPUT is cleared so a developer's exported default can't flip
+      // every test to JSON; tests that need it pass it via `options.env`.
+      env: { ...process.env, HOME: tmpHome, DOT_HOME: dotDir, DOT_OUTPUT: "", ...options?.env },
       // Pin cwd inside the fake HOME so workspace discovery (walk-up from
       // cwd) can never escape into the developer's real ~/.polkadot.
       cwd: tmpHome,
