@@ -42,7 +42,7 @@ import {
   readRawOptionValue,
   registerGlobalOptions,
 } from "./platform/cli.ts";
-import { CliError, formatRuntimeError, isPapiCleanupError, UsageError } from "./utils/errors.ts";
+import { CliError, formatRuntimeError, isPapiCleanupError, usageOf } from "./utils/errors.ts";
 import { parseDotPath } from "./utils/parse-dot-path.ts";
 
 // Early exit for shell completion — avoid loading update checker or heavy imports
@@ -501,10 +501,11 @@ if (process.argv[2] === "__complete") {
     if (jsonErrorsRequested()) {
       // --json contract: everything goes to stdout as JSON, exit code stays non-zero
       const payload: { error: string; usage?: string } = { error: errorMessage(err) };
-      if (err instanceof UsageError) payload.usage = err.usage;
+      const usage = usageOf(err);
+      if (usage !== undefined) payload.usage = usage;
       await writeStdout(`${JSON.stringify(payload)}\n`);
-    } else if (err instanceof UsageError) {
-      console.error(`Error: ${err.message}\n\n${err.usage}`);
+    } else if (usageOf(err) !== undefined) {
+      console.error(`Error: ${(err as Error).message}\n\n${usageOf(err)}`);
     } else if (err instanceof CliError) {
       console.error(`Error: ${err.message}`);
     } else if (err instanceof Error) {
