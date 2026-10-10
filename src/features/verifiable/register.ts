@@ -13,6 +13,8 @@ ${BOLD}Usage:${RESET}
   $ dot verifiable [account] [--entropy-key <key>]       Derive the member key (default action)
   $ dot verifiable <action> [account] [options]
 
+  ${BOLD}bandersnatch${RESET} is an alias for ${BOLD}verifiable${RESET} — every form below works with either name.
+
 ${BOLD}Actions:${RESET}
   member <account>      Derive the Bandersnatch member key (default if omitted)
   alias  <account>      Derive the alias for a 32-byte ring context
@@ -101,6 +103,9 @@ export function registerVerifiableCommands(cli: CAC) {
       "verifiable [action] [...rest]",
       "Bandersnatch member keys, ring-VRF proofs, signing and verification",
     )
+    // `bandersnatch` is an alias for users who think in terms of the underlying
+    // curve/primitive rather than the "verifiable" framing (issue #192).
+    .alias("bandersnatch")
     .option("--entropy-key <key>", "Entropy-derivation key (omit = lite, 'candidate' = full)")
     .option("--context <value>", "32-byte ring/proof context (alias/prove/verify)")
     .option("--message <data>", "Message to sign/bind/verify (text or 0x hex)")

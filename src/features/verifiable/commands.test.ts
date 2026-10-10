@@ -436,4 +436,31 @@ describe("dot verifiable alias / sign / prove / verify", { timeout: 20_000 }, ()
     // compact(2)=0x08 prefix + 2*32 bytes => 65 bytes => 130 hex chars + "0x"
     expect(result.members).toMatch(/^0x08[0-9a-f]{128}$/);
   });
+
+  // `bandersnatch` is a command alias for `verifiable` (issue #192). These
+  // mirror the primary tests above to prove the alias reaches the same handler
+  // and produces identical output.
+  describe("bandersnatch alias", () => {
+    test("no account shows the same help as verifiable", async () => {
+      const { stdout, exitCode } = await runCli(["bandersnatch"]);
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("dot verifiable");
+      expect(stdout).toContain("--entropy-key");
+    });
+
+    test("bandersnatch alice derives the member key", async () => {
+      const { stdout, exitCode } = await runCli(["bandersnatch", "alice"]);
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("Bandersnatch Member Key");
+      expect(stdout).toContain("Member Key:");
+    });
+
+    test("bandersnatch output is byte-identical to verifiable", async () => {
+      const viaAlias = await runCli(["bandersnatch", "alice", "--output", "json"]);
+      const viaVerifiable = await runCli(["verifiable", "alice", "--output", "json"]);
+      expect(viaAlias.exitCode).toBe(0);
+      expect(viaVerifiable.exitCode).toBe(0);
+      expect(viaAlias.stdout).toBe(viaVerifiable.stdout);
+    });
+  });
 });

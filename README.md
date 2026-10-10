@@ -1985,6 +1985,9 @@ and supports `--output json`, so it pipes together and composes with any data
 (for example values you fetched on-chain with `dot` beforehand). It makes no
 assumptions and does no fetching or selection of its own.
 
+> `bandersnatch` is an alias for `verifiable` — `dot bandersnatch <action>` is
+> identical to `dot verifiable <action>` in every form and option.
+
 #### Two concepts you must not conflate
 
 ```
