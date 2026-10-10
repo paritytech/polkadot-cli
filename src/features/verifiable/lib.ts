@@ -16,26 +16,38 @@ import {
 /**
  * Bandersnatch / ring-VRF primitives over `verifiablejs`.
  *
- * Three derivation layers — do NOT conflate the two byte-strings involved:
+ * Member keys follow RFC-0022 (truAPI "Account key derivations"): a keyed-hash
+ * HDKD tree, rooted at the BIP39 entropy, with **hard junctions only**.
  *
- *   mnemonic ─BIP39─▶ seed ─keyed blake2b─▶ Entropy ─▶ member key / secret
- *                            (key = entropy-key:                 │
- *                             "candidate" = full person,         │
- *                             omitted = lite person)             ▼
- *                                              one_shot(…, context, message)
- *                                                            └─ context = 32-byte
- *                                                               ring/proof namespace
- *                                                               (e.g. "dotns")
+ *   mnemonic ─BIP39─▶ entropy ─┬─ blake2b(key "ring-vrf")        = tree root
+ *                              ├─ blake2b(key cc("//peopl.dot")) = product node
+ *                              └─ blake2b(key index_bytes(0|1))  = member entropy
+ *                                                    │
+ *                                                    ▼
+ *                                     one_shot(…, context, message)
+ *                                              └─ context = 32-byte ring/proof
+ *                                                 namespace (e.g. "dotns")
  *
- * - The 32-byte ring **context** is named `context` across the whole stack
- *   (runtime `type Context = [u8;32]`, iOS `deriveAlias(context:)`, verifiablejs
- *   `one_shot(…, context, …)`). It is the app/namespace identifier the alias is
- *   bound to.
- * - The **entropy-key** is the blake2b key used to derive the member entropy. It
- *   is NOT the context and NOT an sr25519 derivation path (it is a single keyed
- *   hash, no junctions). iOS models the choice as lite (unkeyed) vs full
- *   (`blake2b32WithKey("candidate")`). verifiablejs has no notion of it — the
- *   keying is a client convention applied before `member_from_entropy`.
+ * - `index_bytes(0)` is the **full** person key (ring `pop:polkadot.network/people`);
+ *   `index_bytes(1)` is the **lite** person key (`…/people-lite`). They are two
+ *   simultaneously-held keys, not a rotation.
+ * - The product id is `peopl.dot` on **every** network. It is a governance-reserved
+ *   dotNS constant, not a registered name, and the reference apps hardcode it (the
+ *   Android `ProductId` regex cannot even express a non-`.dot` TLD). The network
+ *   axis for personhood lives in the ring — `chainId` + collection id — not in the
+ *   key. See {@link PERSONHOOD_PRODUCT_ID}.
+ * - The 32-byte ring **context** is a different thing entirely: it is named
+ *   `context` across the whole stack (runtime `type Context = [u8;32]`, iOS
+ *   `deriveAlias(context:)`, verifiablejs `one_shot(…, context, …)`) and is the
+ *   app/namespace identifier the alias is bound to. It is NOT part of the key
+ *   derivation. Do not conflate the two.
+ *
+ * This is the default scheme, but not the only one the CLI can produce. See
+ * {@link deriveLegacyMemberEntropy} for the pre-RFC-0022 single keyed hash, which
+ * identities registered before the cutover still hold on-chain, and
+ * {@link parseRawEntropy} for using a secret from any other implementation
+ * verbatim. Every command names the scheme it used in its output, because a key
+ * from the wrong tier is indistinguishable until it fails to validate.
  */
 
 /** On-chain `RingExponent` discriminants (verifiablejs `RingExponent`). Capacity = 2^x − 257. */
@@ -60,31 +72,114 @@ function textOrHexBytes(value: string, label: string): Uint8Array {
   return new TextEncoder().encode(value);
 }
 
+const utf8 = (s: string) => new TextEncoder().encode(s);
+
 /**
- * Resolve an `--entropy-key` flag value to raw bytes used as the keyed-blake2b
- * key. `0x`-prefixed input is decoded as hex; anything else is UTF-8 encoded
- * (matching iOS `Data("candidate".utf8)`). Empty / undefined → unkeyed (lite).
+ * RFC-0022 governance-reserved dotNS product id for personhood ring-VRF keys.
+ *
+ * Pinned to `.dot` on every network, matching iOS `BuiltInProduct.personhood` and
+ * Android `ReservedProductIds.PERSONHOOD`. Overridable via `--product` only as an
+ * escape hatch for clients that deliberately diverge.
  */
-export function resolveEntropyKey(value: string | undefined): Uint8Array | undefined {
-  if (value === undefined || value === "") return undefined;
-  return textOrHexBytes(value, "entropy-key");
+export const PERSONHOOD_PRODUCT_ID = "peopl.dot";
+
+/** Root key of the ring-VRF keyed-hash tree (RFC-0022). */
+const RING_VRF_ROOT_KEY = utf8("ring-vrf");
+
+/** `blake2b256("product-account-index")[..28]` — separates plain-index space from raw indices. */
+const INDEX_MAGIC = blake2b(utf8("product-account-index"), { dkLen: 32 }).slice(0, 28);
+
+/** Which personhood key: `full` = ring `…/people`, `lite` = ring `…/people-lite`. */
+export type PersonKind = "full" | "lite";
+
+/** RFC-0022 index allocations within the personhood product's own index space. */
+export const PERSON_INDEX: Record<PersonKind, number> = { full: 0, lite: 1 };
+
+export function isPersonKind(value: string): value is PersonKind {
+  return value === "full" || value === "lite";
 }
 
 /**
- * Derive the 32-byte Bandersnatch member entropy from a BIP39 mnemonic.
- *
- * `blake2b256(bip39Entropy, key = entropyKey?)`. With no key this is a **lite**
- * person; keyed with `"candidate"` it is a **full** person. The key must match
- * whatever was used when the member was recognised on-chain, otherwise a
- * different (unrecognised) member key is produced.
+ * Expand a plain index to a 32-byte RFC-0022 derivation index:
+ * `u32_le(index) ++ blake2b256("product-account-index")[..28]`.
  */
-export function deriveMemberEntropy(mnemonic: string, entropyKey?: Uint8Array): Uint8Array {
-  const entropy = mnemonicToEntropy(mnemonic);
-  const opts: { dkLen: number; key?: Uint8Array } = { dkLen: 32 };
-  if (entropyKey !== undefined && entropyKey.length > 0) {
-    opts.key = entropyKey;
+export function derivationIndex32(index: number): Uint8Array {
+  if (!Number.isInteger(index) || index < 0 || index > 0xffffffff) {
+    throw new Error(`derivation index must be a u32 (got ${index})`);
   }
-  return blake2b(entropy, opts);
+  const out = new Uint8Array(32);
+  new DataView(out.buffer).setUint32(0, index, true);
+  out.set(INDEX_MAGIC, 4);
+  return out;
+}
+
+/**
+ * Chain code for a hard string junction, matching Substrate's `DeriveJunction`:
+ * SCALE-encode the string (compact length prefix + UTF-8), then zero-pad to 32
+ * bytes — or blake2b-256 the encoding if it exceeds 32 bytes.
+ *
+ * Rejects all-digit segments: Substrate encodes those as `u64` rather than as a
+ * string, so a numeric product id would silently derive a different key. RFC-0022
+ * itself never produces one — product ids are dotNS names (the reference apps'
+ * `ProductId` pattern requires letters) — so an all-digit segment is always a
+ * caller mistake, not a valid path.
+ */
+export function hardChainCode(segment: string): Uint8Array {
+  if (segment.length === 0) {
+    throw new Error("derivation segment must not be empty");
+  }
+  if (/^\d+$/.test(segment)) {
+    throw new Error(
+      `Product id "${segment}" must not be all digits: Substrate SCALE-encodes numeric ` +
+        `junctions as u64, which derives a different key than the string form.`,
+    );
+  }
+  const bytes = utf8(segment);
+  const prefix = compact.enc(bytes.length);
+  const encoded = new Uint8Array(prefix.length + bytes.length);
+  encoded.set(prefix, 0);
+  encoded.set(bytes, prefix.length);
+  if (encoded.length > 32) {
+    return blake2b(encoded, { dkLen: 32 });
+  }
+  const out = new Uint8Array(32);
+  out.set(encoded, 0);
+  return out;
+}
+
+const keyedHash = (data: Uint8Array, key: Uint8Array) => blake2b(data, { dkLen: 32, key });
+
+/**
+ * Derive the 32-byte ring-VRF member entropy for `//{productId}//{index}` from a
+ * raw 32-byte root entropy (RFC-0022). Mirrors iOS `RingVrfEntropyDeriver` and
+ * Android `deriveKeyedEntropy` exactly, so the published cross-platform test
+ * vectors pin this function directly.
+ */
+export function deriveRingVrfEntropyFromRoot(
+  rootEntropy: Uint8Array,
+  productId: string,
+  index: number,
+): Uint8Array {
+  const treeRoot = keyedHash(rootEntropy, RING_VRF_ROOT_KEY);
+  const product = keyedHash(treeRoot, hardChainCode(productId));
+  return keyedHash(product, derivationIndex32(index));
+}
+
+/**
+ * Derive the 32-byte Bandersnatch member entropy for `//{productId}//{index}` in
+ * the ring-VRF keyed-hash tree (RFC-0022). This is the long-term member *secret*
+ * — it signs, proves, and produces aliases, so an incorrect derivation yields
+ * output no ring will accept.
+ *
+ * The tree is rooted at the BIP39 **entropy**, not the 64-byte seed and not the
+ * sr25519 mini-secret — which is why a hex-seed account cannot produce one.
+ */
+export function deriveRingVrfEntropy(
+  mnemonic: string,
+  productId: string,
+  index: number,
+): Uint8Array {
+  return deriveRingVrfEntropyFromRoot(mnemonicToEntropy(mnemonic), productId, index);
 }
 
 /** 32-byte Bandersnatch member public key from member entropy. */
@@ -93,12 +188,76 @@ export function deriveMemberKey(entropy: Uint8Array): Uint8Array {
 }
 
 /**
- * Derive a Bandersnatch member key straight from a BIP39 mnemonic — the
- * composition {@link resolveEntropyKey} → {@link deriveMemberEntropy} →
- * {@link deriveMemberKey} (matching iOS FullPerson / Android CANDIDATE).
+ * Resolve a legacy `--entropy-key` flag value to the raw keyed-blake2b key bytes.
+ * `0x`-prefixed input is hex; anything else is UTF-8 (matching iOS's old
+ * `Data("candidate".utf8)`). Empty / undefined → unkeyed.
  */
-export function deriveBandersnatchMember(mnemonic: string, entropyKey?: string): Uint8Array {
-  return deriveMemberKey(deriveMemberEntropy(mnemonic, resolveEntropyKey(entropyKey)));
+export function resolveEntropyKey(value: string | undefined): Uint8Array | undefined {
+  if (value === undefined || value === "") return undefined;
+  return textOrHexBytes(value, "entropy-key");
+}
+
+/**
+ * Pre-RFC-0022 member entropy: a **single** keyed blake2b over the BIP39 entropy,
+ * with no junctions and no tree — `blake2b256(bip39Entropy, key = entropyKey?)`.
+ * Keyed with `"candidate"` it was a full person, unkeyed a lite person.
+ *
+ * Retained because the reference apps cut over to {@link deriveRingVrfEntropy}
+ * without migrating existing installs: identities registered before the switch
+ * still hold these keys on-chain until `migrate_included_key` moves them, and
+ * reproducing one is exactly what this CLI is for. It is not how new keys should
+ * be derived.
+ *
+ * Note this can reproduce only the *first* level of the RFC-0022 tree — passing
+ * `"ring-vrf"` yields the tree root — and can never reach a member entropy,
+ * because the tree hashes each level's output as the next level's data while
+ * this always hashes the BIP39 entropy.
+ */
+export function deriveLegacyMemberEntropy(mnemonic: string, entropyKey?: Uint8Array): Uint8Array {
+  const entropy = mnemonicToEntropy(mnemonic);
+  const opts: { dkLen: number; key?: Uint8Array } = { dkLen: 32 };
+  if (entropyKey !== undefined && entropyKey.length > 0) {
+    opts.key = entropyKey;
+  }
+  return blake2b(entropy, opts);
+}
+
+/**
+ * Validate a raw 32-byte member entropy supplied directly by the caller
+ * (`--entropy`), bypassing derivation entirely. Lets the tool sign, alias, and
+ * prove for a secret produced by any other implementation — including the
+ * unhashed `member_from_entropy(bip39Entropy)` form — without an account.
+ */
+export function parseRawEntropy(value: string): Uint8Array {
+  if (!value.startsWith("0x")) {
+    throw new Error("raw entropy must be 0x-prefixed hex (64 hex chars)");
+  }
+  const bytes = textOrHexBytes(value, "entropy");
+  if (bytes.length !== 32) {
+    throw new Error(`raw entropy must be exactly 32 bytes (got ${bytes.length})`);
+  }
+  return bytes;
+}
+
+/**
+ * Derive the member entropy for a personhood key — {@link deriveRingVrfEntropy}
+ * with the RFC-0022 index allocation for `full` / `lite`.
+ */
+export function derivePersonEntropy(
+  mnemonic: string,
+  person: PersonKind,
+  productId: string = PERSONHOOD_PRODUCT_ID,
+): Uint8Array {
+  return deriveRingVrfEntropy(mnemonic, productId, PERSON_INDEX[person]);
+}
+
+/** Personhood member public key — {@link derivePersonEntropy} → {@link deriveMemberKey}. */
+export function deriveBandersnatchMember(
+  mnemonic: string,
+  person: PersonKind,
+  productId: string = PERSONHOOD_PRODUCT_ID,
+): Uint8Array {
+  return deriveMemberKey(derivePersonEntropy(mnemonic, person, productId));
 }
 
 /** 32-byte alias for a member entropy under a given 32-byte ring context. */

@@ -447,8 +447,8 @@ dot account create my-validator
 #
 #   Name:          my-validator
 #   Address:       5HQPcHZ2gUKdJM3JbgFvY8t5PfdkpooH2u2LQrAHZ61dZ57M
-#   Bandersnatch:  0xe87b6149a3a91519c10f7f017fedcbf507fc3b8ffa011985b1a1e2b33b020115
-#     (candidate)  0x20fbeef36a7b48a13cd0089c2c3a200ccf387ceead3b12804dd77a533b9ba2de
+#   Bandersnatch:  0xe87b6149a3a91519c10f7f017fedcbf507fc3b8ffa011985b1a1e2b33b020115 (full)
+#                  0x20fbeef36a7b48a13cd0089c2c3a200ccf387ceead3b12804dd77a533b9ba2de (lite)
 #   Mnemonic:      defy ginger general follow use try ...
 #
 #   Save this mnemonic phrase! It is the only way to recover this account.
@@ -2588,45 +2588,78 @@ dot account inspect --parachain 1000 --parachain-type child --json
 
 ### Two concepts you must not conflate
 
+Member keys follow **RFC-0022**: a keyed-hash derivation tree with **hard junctions only**, rooted at the BIP39 entropy.
+
 ```
-Mnemonic ─BIP39─▶ entropy ─keyed blake2b─▶ member entropy ─▶ member key / secret
-                           (key = --entropy-key)                  │
-                                       ring proof: one_shot(…, --context, --message)
+Mnemonic ─BIP39─▶ entropy ─┬─ blake2b(key "ring-vrf")        tree root
+                           ├─ blake2b(key cc("//peopl.dot")) product node   (--product)
+                           └─ blake2b(key index_bytes(0|1))  member entropy (--person/--index)
+                                                 │
+                                ring proof: one_shot(…, --context, --message)
 ```
 
-- **`--entropy-key <text|0xhex>`** — the key mixed into the keyed-blake2b that turns your mnemonic into the Bandersnatch member entropy. **Omit** it for a **lite** person (unkeyed); use **`candidate`** for a **full** person. It must match the key used when the member was recognised on-chain, or you derive a different (unrecognised) member key. It is **not** an sr25519 derivation path and **not** the ring `--context`. (The value is the raw UTF-8 — or hex — bytes of the blake2b key.)
-- **`--context <text|0xhex>`** — the **32-byte ring/proof namespace** (e.g. `"dotns"`), zero-padded right to 32 bytes like Solidity `bytes32()`. It determines the alias and is the verifiablejs `context` parameter. Used by `alias` / `prove` / `verify`.
+Pick **one** of four tiers for the member secret. Combining them is an error, never a precedence rule, because a key from the wrong tier looks identical and only fails at ring-validation time. Every command names the scheme it used in its output.
 
-> **Migration (breaking):** previously `dot verifiable <account> --context candidate` used `--context` as the entropy-derivation key. That key is now `--entropy-key`, and `--context` means the ring context. For one release the old form still works on the member command (with a deprecation warning); switch to `--entropy-key`.
+| Tier | Flags | Derivation |
+|---|---|---|
+| **Well-known** (default) | `--person full\|lite` | `//peopl.dot//index_bytes(0\|1)` |
+| **Any RFC-0022 path** | `--product <id> --index <n>` | `//<id>//index_bytes(n)` |
+| **Legacy** (pre-RFC-0022) | `--entropy-key <text\|0xhex>` | `blake2b(bip39Entropy, key)` — one level |
+| **Raw** | `--entropy 0x<64hex>` | none — these 32 bytes *are* the secret |
+
+- **`--person full|lite`** — which personhood key. **`full`** (the default) is `//peopl.dot//0`, the "PoP" key in ring `pop:polkadot.network/people`; **`lite`** is `//peopl.dot//1`, ring `pop:polkadot.network/people-lite`. Two keys held at once, not a rotation.
+- **`--product <id> --index <n>`** — any path in the RFC-0022 tree, for other products (`dim2.dot`, `uid.dot`, …) or indices. `--index` defaults to `0`; `--index 1` alone equals `--person lite`. Combining `--product` with `--person` is an error — the full/lite names belong to `peopl.dot`.
+- **`--entropy-key`** — the pre-RFC-0022 scheme: one keyed blake2b over the BIP39 entropy (`candidate` = full, omitted = lite). Kept because the reference apps cut over without migrating, so identities registered before the switch still hold these keys on-chain.
+- **`--entropy`** — 32 bytes used verbatim as the secret, with no derivation and **no account**, so `sign` / `alias` / `prove` work with a key from any other implementation.
+- **`--context <text|0xhex>`** — **not** a key input. The 32-byte ring/proof namespace (e.g. `"dotns"`), zero-padded right to 32 bytes like Solidity `bytes32()`. It determines the alias and is the verifiablejs `context` parameter, used by `alias` / `prove` / `verify`. On `member` it is rejected outright: it once selected the legacy entropy key there, and silently ignoring it would hand a pre-cutover caller the wrong key.
+
+The product id is `peopl.dot` on **every** network — a governance-reserved dotNS constant the reference apps pin regardless of chain. The network axis for personhood lives in the **ring** (`chainId` + collection id), not in the key.
+
+> **Migration (breaking):** member keys now follow RFC-0022 by default. A bare `dot verifiable alice` used to mean the unkeyed **lite** key; it is now the **full** RFC-0022 key, so the same command returns a different key than in the previous release. `--entropy-key candidate` still works but now selects the clearly-labelled legacy tier rather than being the normal path — use `--person full` for new work.
+>
+> The reference apps cut over without migrating existing installs, so an identity registered under the old scheme keeps its old key on-chain until the runtime's `migrate_included_key` moves it. Reproduce that key with `--entropy-key`.
+>
+> Deriving a key also renames the two entries the old `dot account create` stored (`""` and `"candidate"`) to `legacy:` / `legacy:candidate` in `accounts.json`, so `account inspect` can no longer present them as current keys.
 
 ### Member keys
 
 ```
-# Lite person (unkeyed)
+# Full person (default) — //peopl.dot//0
 dot verifiable alice
 #   Account:    alice
-#   Member Key: 0xbb6ee099b568f1844d62fc00e6305c2e83aa8da30ce59e664ef39e089204d43c
+#   Person:     full
+#   Path:       //peopl.dot//0
+#   Member Key: 0x69ef2ed666eb7bfabcf93b4360c59439a03d6de3cccf77a411fcaa7017caf4a3
 
-# Full person (candidate-keyed)
+# Lite person — //peopl.dot//1
+dot verifiable alice --person lite
+
+# Any RFC-0022 path
+dot verifiable alice --product dim2.dot --index 1
+
+# Legacy pre-RFC-0022 key (identities registered before the cutover)
 dot verifiable alice --entropy-key candidate
-#   Account:     alice
+#   Scheme:      legacy keyed-hash (pre-RFC-0022)
 #   Entropy Key: candidate
 #   Member Key:  0x5f915576987547d3e55bb4129ac8cae1d338f8933073dc74272b4c825f738592
+
+# Raw secret from any other tool — no account needed
+dot verifiable --entropy 0x<64 hex>
 ```
 
 ### Alias, sign, prove, verify
 
 ```
 # Alias for a ring context (deterministic in entropy + context)
-dot verifiable alias alice --entropy-key candidate --context dotns
+dot verifiable alias alice --context dotns
 
 # Standalone Bandersnatch signature (64 bytes), and verify it
-dot verifiable sign alice --message "hello" --entropy-key candidate
+dot verifiable sign alice --message "hello"
 dot verifiable verify-sig --signature 0x… --member 0x… --message "hello"
 
 # SCALE-encode a ring, prove membership bound to a challenge, verify locally
 dot verifiable members 0x<key> 0x<key> --output json
-dot verifiable prove alice --entropy-key candidate --context dotns \
+dot verifiable prove alice --context dotns \
     --message 0x… --members 0x… --output json
 dot verifiable verify --proof 0x… --context dotns --message 0x… --members 0x…
 # verify / verify-sig exit non-zero if the proof / signature does not validate
@@ -2644,12 +2677,12 @@ Account Info
   Name:             my-account
   Public Key:       0x44a9...eb0f
   SS58:             5DfhGyQ...
-  Bandersnatch:     0xabc1...
-               (candidate) 0xdef2...
+  Bandersnatch:     (full) 0xabc1...
+                    (lite) 0xdef2...
   Prefix:           42
 ```
 
-When creating a new account with `dot account create`, both the unkeyed and `candidate` member keys are derived and saved. For dev accounts (alice, bob, etc.), use `dot verifiable` directly.
+When creating a new account with `dot account create`, both the `full` and `lite` member keys are derived and saved. For dev accounts (alice, bob, etc.), use `dot verifiable` directly.
 
 ### Requirements
 
