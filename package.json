@@ -39,6 +39,7 @@
   "dependencies": {
     "@noble/hashes": "^2.3.0",
     "@polkadot-api/metadata-builders": "^0.15.0",
+    "@polkadot-api/signers-common": "^0.3.0",
     "@polkadot-api/substrate-bindings": "^0.21.0",
     "@polkadot-api/substrate-client": "^0.7.0",
     "@polkadot-api/view-builder": "^0.6.0",

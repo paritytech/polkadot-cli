@@ -113,6 +113,8 @@ if (process.argv[2] === "__complete") {
       "Submit as a general (v5) transaction — authorized via extensions, no signer (for tx)",
     )
     .option("--unsigned", "(deprecated) Alias for --general")
+    .option("--v4", "Force signing as an Extrinsic V4 transaction (for tx)")
+    .option("--v5", "Force signing as an Extrinsic V5 General transaction (for tx)")
     .option("--refresh", "Refresh the cached RPC method list from the node (for rpc)")
     .action(
       async (
@@ -137,6 +139,8 @@ if (process.argv[2] === "__complete") {
           at?: string;
           general?: boolean;
           unsigned?: boolean;
+          v4?: boolean;
+          v5?: boolean;
           dump?: boolean;
           refresh?: boolean;
           var?: string | string[];
@@ -178,6 +182,8 @@ if (process.argv[2] === "__complete") {
                 ...handlerOpts,
                 from: opts.from,
                 general: resolveGeneralFlag(opts) ?? cmd.general,
+                v4: opts.v4,
+                v5: opts.v5,
                 dryRun: fileDryRun,
                 encode: opts.encode,
                 toYaml: opts.toYaml,
@@ -296,6 +302,8 @@ if (process.argv[2] === "__complete") {
               ...handlerOpts,
               from: opts.from,
               general: resolveGeneralFlag(opts),
+              v4: opts.v4,
+              v5: opts.v5,
               dryRun,
               encode: opts.encode,
               toYaml: opts.toYaml,

@@ -1,4 +1,3 @@
-import { compact as scaleCompact } from "@polkadot-api/substrate-bindings";
 import type { Decoded } from "@polkadot-api/view-builder";
 import { getViewBuilder } from "@polkadot-api/view-builder";
 import type { TxBroadcasted, TxEvent, TxFinalized, TxInBestBlock } from "polkadot-api";
@@ -7,9 +6,14 @@ import type { SignerTxCreator, TxCreator } from "polkadot-api/tx-creator";
 import { stringify as stringifyYaml } from "yaml";
 import { loadConfig, resolveChain } from "../config/store.ts";
 import { primaryRpc } from "../config/types.ts";
-import { resolveAccountSigner, toSs58 } from "../core/accounts.ts";
+import { resolveAccountKeypair, signerFromKeypair, toSs58 } from "../core/accounts.ts";
 import { type ClientHandle, createChainClient } from "../core/client.ts";
 import { papiLink, pjsAppsLink } from "../core/explorers.ts";
+import {
+  assembleV5General,
+  checkV5SignedCapability,
+  type V5SignedCapability,
+} from "../core/extrinsic-v5.ts";
 import type { Lookup, MetadataBundle } from "../core/metadata.ts";
 import {
   describeCallArgs,
@@ -147,6 +151,30 @@ export function parseAtForRead(raw: string | undefined): string | undefined {
   );
 }
 
+/**
+ * Pick the extrinsic version to sign with: forced by --v4/--v5, otherwise the
+ * highest version the chain can actually authorize. v5 General signing is
+ * capability-gated — a forced --v5 on an incapable chain is refused up front
+ * instead of letting the runtime reject the submission with UnknownOrigin.
+ */
+export function resolveExtrinsicVersion(
+  meta: MetadataBundle,
+  opts: { v4?: boolean; v5?: boolean },
+): { version: 4 | 5; capability: V5SignedCapability } {
+  const capability = checkV5SignedCapability(meta);
+  if (opts.v5) {
+    if (!capability.ok) {
+      throw new CliError(
+        `--v5: this chain can't accept signed v5 transactions — ${capability.reason}. ` +
+          "Drop --v5 to sign a v4 transaction.",
+      );
+    }
+    return { version: 5, capability };
+  }
+  if (opts.v4) return { version: 4, capability };
+  return { version: capability.ok ? 5 : 4, capability };
+}
+
 export async function handleTx(
   target: string | undefined,
   args: string[],
@@ -168,6 +196,8 @@ export async function handleTx(
     tip?: string;
     mortality?: string;
     at?: string;
+    v4?: boolean;
+    v5?: boolean;
     /** Pre-parsed args from a file (skip CLI string parsing, still normalize) */
     parsedArgs?: unknown;
   },
@@ -247,6 +277,20 @@ export async function handleTx(
     return;
   }
 
+  if (opts.v4 && opts.v5) {
+    throw new Error("--v4 and --v5 are mutually exclusive");
+  }
+  if ((opts.v4 || opts.v5) && opts.general) {
+    throw new Error(
+      "--v4/--v5 and --general are mutually exclusive (--general always emits a v5 general transaction)",
+    );
+  }
+  if ((opts.v4 || opts.v5) && !opts.from) {
+    throw new Error(
+      `--${opts.v5 ? "v5" : "v4"} requires --from (it selects how the transaction is signed)`,
+    );
+  }
+
   if (!opts.from && !opts.general && !opts.encode && !opts.toYaml && !opts.toJson) {
     if (isRawCall) {
       throw new Error(
@@ -303,7 +347,9 @@ export async function handleTx(
   const { name: chainName, chain: chainConfig } = resolveChain(config, effectiveChain);
 
   const decodeOnly = opts.encode || opts.toYaml || opts.toJson;
-  const signer = decodeOnly || opts.general ? undefined : await resolveAccountSigner(opts.from!);
+  // Resolve the account up front (fails fast, offline); which signer wraps it
+  // depends on the extrinsic version, decided once metadata is available.
+  const keypair = decodeOnly || opts.general ? undefined : await resolveAccountKeypair(opts.from!);
 
   let clientHandle: ClientHandle | undefined;
 
@@ -324,6 +370,17 @@ export async function handleTx(
       }
     }
 
+    // Pick the extrinsic version and wrap the keypair in the matching signer.
+    let extrinsicVersion: 4 | 5 = 4;
+    let v5AuthIdentifier: string | undefined;
+    let signer: SignerTxCreator | undefined;
+    if (keypair) {
+      const { version, capability } = resolveExtrinsicVersion(meta, opts);
+      extrinsicVersion = version;
+      if (capability.ok) v5AuthIdentifier = capability.authIdentifier;
+      signer = signerFromKeypair(keypair, version);
+    }
+
     // Build transaction options (custom extensions + nonce/tip/mortality/at)
     let unsafeApi: any;
     let txOptions: Record<string, any> | undefined;
@@ -338,6 +395,13 @@ export async function handleTx(
 
     if (!decodeOnly || opts.general) {
       const userExtOverrides = parseExtOption(opts.ext);
+
+      if (extrinsicVersion === 5 && v5AuthIdentifier && v5AuthIdentifier in userExtOverrides) {
+        throw new CliError(
+          `--ext override for ${v5AuthIdentifier} conflicts with v5 signing — ` +
+            "that extension carries the v5 signature. Force v4 with --v4 to set it manually.",
+        );
+      }
 
       const customSignedExtensions = buildCustomSignedExtensions(meta, userExtOverrides);
 
@@ -482,6 +546,7 @@ export async function handleTx(
         const result: Record<string, unknown> = {
           chain: chainName,
           from: { name: opts.from, address: signerAddress },
+          extrinsicVersion,
           callHex,
           decoded: decodedStr,
           estimatedFees,
@@ -499,6 +564,7 @@ export async function handleTx(
 
       console.log(`  ${BOLD}Chain:${RESET}  ${chainName}`);
       console.log(`  ${BOLD}From:${RESET}   ${opts.from} (${signerAddress})`);
+      console.log(`  ${BOLD}Type:${RESET}   ${describeExtrinsicVersion(extrinsicVersion)}`);
       console.log(`  ${BOLD}Call:${RESET}   ${callHex}`);
       printDecodedCall(decodedObj, decodedStr);
       if (nonce !== undefined) console.log(`  ${BOLD}Nonce:${RESET} ${nonce}`);
@@ -669,6 +735,7 @@ export async function handleTx(
       }
       printJsonLine({
         event: result.type === "finalized" ? "finalized" : "bestBlock",
+        extrinsicVersion,
         blockNumber: result.block.number,
         blockHash,
         txHash: result.txHash,
@@ -697,6 +764,7 @@ export async function handleTx(
 
     console.log();
     console.log(`  ${BOLD}Chain:${RESET}  ${chainName}`);
+    console.log(`  ${BOLD}Type:${RESET}   ${describeExtrinsicVersion(extrinsicVersion)}`);
     console.log(`  ${BOLD}Call:${RESET}   ${callHex}`);
     printDecodedCall(decodedObj, decodedStr);
     if (nonce !== undefined) console.log(`  ${BOLD}Nonce:${RESET} ${nonce}`);
@@ -758,6 +826,10 @@ export async function handleTx(
   } finally {
     clientHandle?.destroy();
   }
+}
+
+function describeExtrinsicVersion(version: 4 | 5): string {
+  return version === 5 ? "signed (v5 general)" : "signed (v4)";
 }
 
 function formatDispatchError(err: { type: string; value?: unknown }): string {
@@ -1776,38 +1848,7 @@ function buildGeneralTx(
     extBytes.push(codec.enc(value));
   }
 
-  // Assemble: 0x45 | ext_version | ext_extras | call_data
-  const extVersion = new Uint8Array([extensionVersion]);
-  const versionByte = new Uint8Array([0x45]);
-
-  // Calculate total payload length
-  let payloadLen = 1 + 1; // version byte + ext version
-  for (const b of extBytes) payloadLen += b.length;
-  payloadLen += callData.length;
-
-  const lengthPrefix = scaleCompact.enc(payloadLen);
-
-  // Concatenate all parts
-  const total = new Uint8Array(lengthPrefix.length + payloadLen);
-  let offset = 0;
-
-  total.set(lengthPrefix, offset);
-  offset += lengthPrefix.length;
-
-  total.set(versionByte, offset);
-  offset += 1;
-
-  total.set(extVersion, offset);
-  offset += 1;
-
-  for (const b of extBytes) {
-    total.set(b, offset);
-    offset += b.length;
-  }
-
-  total.set(callData, offset);
-
-  return total;
+  return assembleV5General(extensionVersion, extBytes, callData);
 }
 
 // --- Progressive transaction tracking ---
