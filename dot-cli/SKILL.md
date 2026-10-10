@@ -75,6 +75,22 @@ dot chain info polkadot --json | jq -r '.metadata.specVersion // "uncached"'
 # 1003000
 ```
 
+Ask the chain for its token decimals, symbol, and ss58 prefix instead of hardcoding them — `dot chain properties <name>` wraps `system_properties` (with a `chainSpec_v1_properties` fallback):
+
+```bash
+dot chain properties polkadot --json
+# {
+#   "tokenDecimals": 10,
+#   "tokenSymbol": "DOT",
+#   "ss58Format": 0
+# }
+
+# Scripts should derive decimals rather than baking in NATIVE_DECIMALS=12:
+NATIVE_DECIMALS=$(dot chain properties polkadot --json | jq .tokenDecimals)
+```
+
+Some chains return `tokenDecimals`/`tokenSymbol` as arrays (multiple native-ish tokens); the JSON preserves them as-is. Minimal chains that expose no properties return `null` for each field.
+
 Every chain-consuming command needs an explicit chain — prefer the dotpath prefix:
 
 ```bash
