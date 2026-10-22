@@ -25,7 +25,7 @@ export const DEFAULT_CONFIG: Config = {
         "wss://polkadot-rpc.publicnode.com",
         "wss://polkadot.api.onfinality.io/public-ws",
         "wss://rpc.interweb-it.com/polkadot",
-        "wss://polkadot.rotko.net",
+        "wss://spectrum-03.simplystaking.xyz/cG9sa2Fkb3QtMDMtOTFkMmYwZGYtcG9sa2Fkb3Q/LjwBJpV3dIKyWQ/polkadot/mainnet/",
         // Parity's own endpoint stays the last-resort fallback so the default
         // path favours independent providers.
         "wss://rpc.polkadot.io",
@@ -54,6 +54,7 @@ export const DEFAULT_CONFIG: Config = {
         "wss://rpc-bridge-hub-polkadot.stakeworld.io",
         "wss://bridgehub-polkadot.api.onfinality.io/public-ws",
         "wss://bridge-hub-polkadot.rotko.net",
+        "wss://spectrum-03.simplystaking.xyz/cG9sa2Fkb3QtMDMtOTFkMmYwZGYtcG9sa2Fkb3Q/mgX--uWlEtmNKw/polkadotbridgehub/mainnet/",
       ],
       relay: "polkadot",
       parachainId: 1002,
@@ -63,6 +64,7 @@ export const DEFAULT_CONFIG: Config = {
         "wss://bulletin-rpc.polkadot.io",
         "wss://rpc-bulletin.luckyfriday.io",
         "wss://rpc.interweb-it.com/bulletin-polkadot",
+        "wss://spectrum-03.simplystaking.xyz/cG9sa2Fkb3QtMDMtOTFkMmYwZGYtcG9sa2Fkb3Q/9QbAeudedsupNA/polkadotbulletin/mainnet/",
       ],
       relay: "polkadot",
       parachainId: 1010,
