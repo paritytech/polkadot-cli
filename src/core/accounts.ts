@@ -176,7 +176,7 @@ function createChainCode(code: string): Uint8Array {
 }
 
 export function deriveExpandedSecret(miniSecret: Uint8Array, path: string): Uint8Array {
-  return parseDerivations(path).reduce(
+  return parseDerivations(path).reduce<Uint8Array>(
     (sk, [type, code]) =>
       type === "hard"
         ? HDKD.secretHard(sk, createChainCode(code))
