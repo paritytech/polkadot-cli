@@ -86,7 +86,8 @@ describe("dot account", { timeout: 15_000 }, () => {
     expect(stdout).toContain("Mnemonic:");
     expect(stdout).toContain("Address:");
     expect(stdout).toContain("Bandersnatch:");
-    expect(stdout).toContain("(candidate)");
+    expect(stdout).toContain("(full)");
+    expect(stdout).toContain("(lite)");
   });
 
   test("new is an alias for create", async () => {
@@ -1282,14 +1283,14 @@ describe("dot account", { timeout: 15_000 }, () => {
   test("export preserves bandersnatch keys", async () => {
     const acct: StoredAccount = {
       ...STORED_ACCOUNT,
-      bandersnatch: { "": "0xaabb", candidate: "0xccdd" },
+      bandersnatch: { full: "0xaabb", lite: "0xccdd" },
     };
     const { stdout, exitCode } = await runCli(["account", "export", "--include-secrets"], {
       accounts: [acct],
     });
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout);
-    expect(parsed.accounts[0].bandersnatch).toEqual({ "": "0xaabb", candidate: "0xccdd" });
+    expect(parsed.accounts[0].bandersnatch).toEqual({ full: "0xaabb", lite: "0xccdd" });
   });
 
   test("batch import adds new accounts (positional file)", async () => {

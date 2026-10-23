@@ -19,7 +19,10 @@ export interface StoredAccount {
   publicKey: string; // hex 0x-prefixed, 32 bytes (may be "" for deferred env accounts)
   derivationPath: string; // "" for root
   source?: AccountSource;
-  bandersnatch?: Record<string, string>; // key (""=unkeyed) → hex member key
+  // RFC-0022 ring-VRF member keys: "full" = //peopl.dot//0, "lite" = //peopl.dot//1.
+  // A --product/--index override stores under "<productId>/<index>", and legacy
+  // pre-RFC-0022 keyed-hash keys under "legacy:<entropyKey>" ("legacy:" = unkeyed).
+  bandersnatch?: Record<string, string>;
 }
 
 export function isWatchOnly(account: StoredAccount): boolean {
