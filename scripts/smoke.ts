@@ -10,7 +10,8 @@
  *    as a warning, not a failure: the CLI rotates past it, and one flaky public
  *    node should not turn the nightly run red.
  * 3. With PASEO_CI_MNEMONIC set, submits a remark and a transfer on Paseo Asset
- *    Hub and waits for finality. Skipped without the secret.
+ *    Hub and waits for finality. Skipped without the secret, which GitHub
+ *    withholds from pull requests opened from forks.
  *
  * State lives in a throwaway DOT_HOME, never ~/.polkadot.
  */
@@ -93,6 +94,28 @@ async function probeEndpoint(chain: string, url: string) {
   }
 }
 
+/**
+ * Submit a transaction and wait for finality. Runs on different PRs share the
+ * CI account, so two submissions can race on the nonce; retry with jitter.
+ */
+async function submit(args: string[], attempts = 3): Promise<any> {
+  for (let i = 1; ; i++) {
+    try {
+      const r = lastJsonLine(await dot(args, 300_000));
+      if (r.event !== "finalized" || !r.ok) throw new Error(JSON.stringify(r));
+      return r;
+    } catch (e) {
+      if (i >= attempts) throw e;
+      console.log(`retry ${args[0]} (attempt ${i} failed: ${(e as Error).message.split("\n")[0]})`);
+      await Bun.sleep(5_000 + Math.random() * 10_000);
+    }
+  }
+}
+
+async function publicKey(address: string): Promise<string> {
+  return JSON.parse(await dot(["account", "inspect", address])).publicKey;
+}
+
 async function transactions() {
   await dot(["account", "add", "ci", "--env", "PASEO_CI_MNEMONIC"]);
   await dot(["account", "add", "ci-2", "--env", "PASEO_CI_MNEMONIC", "--path", "//2"]);
@@ -110,28 +133,31 @@ async function transactions() {
   }
 
   await check(`${TX_CHAIN} tx System.remark (finalized)`, async () => {
-    const r = lastJsonLine(
-      await dot([`${TX_CHAIN}.tx.System.remark`, "0x736d6f6b65", "--from", "ci"], 300_000),
-    );
-    if (r.event !== "finalized" || !r.ok) throw new Error(JSON.stringify(r));
+    const r = await submit([`${TX_CHAIN}.tx.System.remark`, "0x736d6f6b65", "--from", "ci"]);
     return `block #${r.blockNumber}`;
   });
 
   await check(`${TX_CHAIN} tx Balances.transfer_keep_alive (finalized)`, async () => {
     const amount = BigInt(JSON.parse(await dot([`${TX_CHAIN}.const.Balances.ExistentialDeposit`])));
-    const before = await freeBalance(receiver);
-    const r = lastJsonLine(
-      await dot(
-        [`${TX_CHAIN}.tx.Balances.transfer_keep_alive`, receiver, amount.toString(), "--from", "ci"],
-        300_000,
-      ),
+    const r = await submit([
+      `${TX_CHAIN}.tx.Balances.transfer_keep_alive`,
+      receiver,
+      amount.toString(),
+      "--from",
+      "ci",
+    ]);
+    // Check the transfer through its own event rather than the receiver's
+    // balance, which a concurrent run on another PR may also be topping up.
+    const receiverKey = await publicKey(receiver);
+    const transfers = (r.events ?? []).filter(
+      (e: any) => e.pallet === "Balances" && e.name === "Transfer",
     );
-    if (r.event !== "finalized" || !r.ok) throw new Error(JSON.stringify(r));
-    const after = await freeBalance(receiver);
-    if (after - before !== amount) {
-      throw new Error(`receiver balance moved by ${after - before}, expected ${amount}`);
+    for (const e of transfers) {
+      if (BigInt(e.fields.amount) === amount && (await publicKey(e.fields.to)) === receiverKey) {
+        return `block #${r.blockNumber}`;
+      }
     }
-    return `block #${r.blockNumber}`;
+    throw new Error(`no Balances.Transfer of ${amount} to ${receiver}: ${JSON.stringify(transfers)}`);
   });
 }
 

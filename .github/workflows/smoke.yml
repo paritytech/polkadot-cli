@@ -2,8 +2,12 @@ name: Live smoke test
 
 # Runs the built CLI against real public RPC: reads on every built-in chain,
 # a probe of every bundled endpoint, and a remark + transfer on Paseo Asset Hub
-# signed by a dedicated CI account (secret PASEO_CI_MNEMONIC). Not part of
-# per-PR CI so flaky public nodes never block merges.
+# signed by a dedicated CI account (secret PASEO_CI_MNEMONIC). Kept out of the
+# main CI job so a flaky public node never blocks a merge.
+#
+# Pull requests from forks get no secrets, so they run the reads only and skip
+# the transactions. Never switch this to pull_request_target: that would hand
+# the CI key to code from an untrusted fork.
 #
 # Refill the CI account from https://faucet.polkadot.io (Paseo Asset Hub):
 # 133zRsGWUFGpB9Xr3ELsULuTDcJHuZqZSgB8WmhjXXgxxcSg
@@ -14,14 +18,15 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [main]
-    paths:
-      - scripts/smoke.ts
-      - .github/workflows/smoke.yml
 
-# One run at a time, so two runs never race on the CI account's nonce.
+# A new push to the same PR replaces its in-flight run. Runs on different PRs
+# proceed side by side; scripts/smoke.ts retries if they race on the nonce.
 concurrency:
-  group: smoke
-  cancel-in-progress: false
+  group: smoke-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   smoke:
