@@ -20,6 +20,7 @@
     "test": "bun test --concurrent",
     "test:coverage": "bun test --concurrent --coverage --coverage-reporter=lcov --coverage-dir=coverage",
     "tapes": "bun scripts/tapes.ts",
+    "smoke": "bun scripts/smoke.ts",
     "prepare": "husky",
     "changeset": "changeset",
     "version": "changeset version"
