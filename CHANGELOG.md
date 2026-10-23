@@ -1,5 +1,11 @@
 # polkadot-cli
 
+## 1.25.2
+
+### Patch Changes
+
+- bcbc2ef: Update all dependencies to their latest versions, including polkadot-api 3.3, `@scure/sr25519` 2.x and the `@polkadot-labs/hdkd` packages.
+
 ## 1.25.1
 
 ### Patch Changes
