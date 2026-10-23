@@ -1,0 +1,45 @@
+name: Live smoke test
+
+# Runs the built CLI against real public RPC: reads on every built-in chain,
+# a probe of every bundled endpoint, and a remark + transfer on Paseo Asset Hub
+# signed by a dedicated CI account (secret PASEO_CI_MNEMONIC). Not part of
+# per-PR CI so flaky public nodes never block merges.
+#
+# Refill the CI account from https://faucet.polkadot.io (Paseo Asset Hub):
+# 133zRsGWUFGpB9Xr3ELsULuTDcJHuZqZSgB8WmhjXXgxxcSg
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/smoke.ts
+      - .github/workflows/smoke.yml
+
+# One run at a time, so two runs never race on the CI account's nonce.
+concurrency:
+  group: smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run build
+
+      - run: bun run smoke
+        env:
+          PASEO_CI_MNEMONIC: ${{ secrets.PASEO_CI_MNEMONIC }}
